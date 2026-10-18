@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+sandbox/fake_sandbox.py
+# tests/
+
+SPEC.md
+PLAN.md
