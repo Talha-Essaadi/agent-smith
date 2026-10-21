@@ -1,5 +1,7 @@
 import re
+import html
 import json
+import keyword
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
@@ -36,22 +38,25 @@ _UNCLOSED_PYTHON_RE = re.compile(
 )
 #  For the JSON block
 _JSON_TOOL_CALL_RE = re.compile(
-        r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL
+    r"<tool_call>\s*(\{(?:(?!</tool_call>).)*?\})\s*(?:</tool_call>|\Z)",
+    re.DOTALL | re.IGNORECASE,
 )
 #  For the XML block
 _XML_INVOKE_RE = re.compile(
-    r'<(?:\w+:)?invoke\s+name=["\']([^"\']+)["\']?\s*>(.*?)</(?:\w+:)?invoke>',
-    re.DOTALL
+    r'<(?:\w+:)?invoke\s+name\s*=\s*["\']([^"\']+)["\']\s*'
+    r'(?:/>|>(.*?)(?:</(?:\w+:)?invoke\s*>|(?=<(?:\w+:)?invoke\b)|\Z))',
+    re.DOTALL | re.IGNORECASE,
 )
 _XML_PARAM_RE = re.compile(
-    r'<parameter\s+name=["\'"]([^"\'"]+)["\'"]?\s*>(.*?)</parameter>',
-    re.DOTALL
+    r'<(?:\w+:)?parameter\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)'
+    r'(?:</(?:\w+:)?parameter\s*>|(?=<(?:\w+:)?parameter\b)|\Z)',
+    re.DOTALL | re.IGNORECASE,
 )
 # For the ReAct block
 _REACT_RE = re.compile(
-    r"Action\s*:\s*([a-zA-Z_][a-zA-Z0-9_]*)"
-    r"\s*\nAction\s+Input\s*:\s*(\{.*\})",
-    re.DOTALL,
+    r"^[ \t]*Action[ \t]*:[ \t]*([A-Za-z_][\w.]*)[ \t]*\n"
+    r"[ \t]*Action[ \t]+Input[ \t]*:\s*",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # Stop sequences that LLMs emit to signal end-of-generation.
@@ -83,9 +88,9 @@ def _strip_stop_sequences(text: str) -> str:
     """
     stripped = text
     for seq in _STOP_SEQUENCES:
-        tail = stripped.rstrip()
-        if tail.endswith(seq):
-            stripped = tail[: -len(seq)]
+        idx = stripped.find(seq)
+        if idx != -1:
+            stripped = stripped[:idx]
 
     return stripped
 
@@ -179,10 +184,12 @@ class CodeExtractor:
         )
 
     def _detect_block_type(self, llm_output: str) -> str:
+        best, best_pos = "unknown", None
         for output_type, pattern in PATTERNS.items():
-            if pattern.search(llm_output):
-                return output_type
-        return "unknown"
+            m = pattern.search(llm_output)
+            if m and (best_pos is None or m.start() < best_pos):
+                best, best_pos = output_type, m.start()
+        return best
 
     def _code_block_extractor(self,
                               llm_output: str) -> Optional[ExtractionResult]:
@@ -279,26 +286,29 @@ class CodeExtractor:
         )
 
     def _react_extractor(self, llm_output: str) -> Optional[ExtractionResult]:
-        react_blocks = _REACT_RE.findall(llm_output)
-        if react_blocks:
-            try:
-                code = self._convert_react(react_blocks)
-            except json.JSONDecodeError as exc:
-                return ExtractionResult(
-                    is_valid=False,
-                    error=(
-                        f"[ERROR: Malformed JSON in ReAct Action Input: {exc}."
-                        " The value after 'Action Input:' must be a valid JSON"
-                        " object, e.g.:\n"
-                        "  Action: tool_name\n"
-                        "  Action Input: {\"arg\": \"value\"}]"
-                    ),
-                )
-            if code:
-                return ExtractionResult(
-                    is_valid=True,
-                    code=code,
-                )
+        llm_output = re.split(r"^[ \t]*Observation[ \t]*:", llm_output,
+                              maxsplit=1,
+                              flags=re.MULTILINE | re.IGNORECASE)[0]
+        react_blocks = []
+        try:
+            for m in _REACT_RE.finditer(llm_output):
+                value, _ = json.JSONDecoder().raw_decode(llm_output, m.end())
+                react_blocks.append((m.group(1), value))
+            code = self._convert_react(react_blocks) if react_blocks else ""
+        except ValueError as exc:
+            return ExtractionResult(
+                is_valid=False,
+                error=(
+                    f"[ERROR: Invalid ReAct Action / Action Input: {exc}."
+                    " ...]"
+                ),
+            )
+
+        if code:
+            return ExtractionResult(
+                is_valid=True,
+                code=code,
+            )
 
         return ExtractionResult(
             is_valid=False,
@@ -336,11 +346,16 @@ class CodeExtractor:
             params = _XML_PARAM_RE.findall(body)
             kwargs: Dict[str, Any] = {}
             for k, v in params:
-                val_str = v.strip()
+                val_str = v[1:] if v.startswith("\n") else v
+                val_str = val_str[:-1] if val_str.endswith("\n") else val_str
+                val_str = html.unescape(val_str)
+                kwargs[k] = val_str
                 try:
-                    kwargs[k] = json.loads(val_str)
-                except Exception:
-                    kwargs[k] = val_str
+                    parsed = json.loads(val_str.strip())
+                    if parsed is not None and not isinstance(parsed, str):
+                        kwargs[k] = parsed
+                except ValueError:
+                    pass
             lines.append(self._to_py(func_name, kwargs))
         return "\n".join(lines)
 
@@ -349,25 +364,49 @@ class CodeExtractor:
         for block in blocks:
             json_block = json.loads(block)
             func_name = json_block["name"]
-            kwargs: Dict[str, Any] = json_block["arguments"]
+
+            kwargs = json_block.get(
+                "arguments",
+                json_block.get("parameters", {})
+            )
+            if isinstance(kwargs, str):
+                kwargs = json.loads(kwargs)
             if kwargs is None:
                 kwargs = {}
+            if not isinstance(kwargs, dict):
+                raise ValueError('Action Input must be a JSON object')
             lines.append(self._to_py(func_name, kwargs))
         return "\n".join(lines)
 
     def _convert_react(self, blocks: List[Any]) -> str:
         lines: List[str] = []
-        for func_name, body in blocks:
-            kwargs: Dict[str, Any] = json.loads(body)
+        for func_name, kwargs in blocks:
+            if isinstance(kwargs, str):
+                kwargs = json.loads(kwargs)
             if kwargs is None:
                 kwargs = {}
+            if not isinstance(kwargs, dict):
+                raise ValueError('"arguments" must be a JSON object')
             lines.append(self._to_py(func_name, kwargs))
         return "\n".join(lines)
 
     def _to_py(self, func_name: str, kwargs: Dict[str, Any]) -> str:
         """Converts a tool name and dictionary of
          arguments into a valid Python call string."""
-        args = ", ".join([f"{k}={repr(v)}" for k, v in kwargs.items()])
+        if not isinstance(func_name, str) \
+                or not re.fullmatch(r"[A-Za-z_]\w*", func_name) \
+                or keyword.iskeyword(func_name):
+            raise ValueError(f"{func_name!r} is not a valid tool name")
+
+        good = {k: v for k, v in kwargs.items()
+                if (isinstance(k, str) and k.isidentifier()
+                    and not keyword.iskeyword(k))
+                }
+        bad = {k: v for k, v in kwargs.items() if k not in good}
+
+        args = ", ".join(f"{k}={v!r}" for k, v in good.items())
+        if bad:
+            args += (", " if args else "") + f"**{bad!r}"
         func_call = f"{func_name}({args})"
         if func_name == "final_answer" and len(kwargs) == 1:
             return f"{func_name}({repr(list(kwargs.values())[0])})"
