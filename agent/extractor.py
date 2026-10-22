@@ -225,7 +225,19 @@ class CodeExtractor:
     def _xml_extractor(self, llm_output: str) -> Optional[ExtractionResult]:
         xml_blocks = _XML_INVOKE_RE.findall(llm_output)
         if xml_blocks:
-            code = self._convert_xml(xml_blocks)
+            try:
+                code = self._convert_xml(xml_blocks)
+            except ValueError as exc:
+                return ExtractionResult(
+                    is_valid=False,
+                    error=(
+                        "[ERROR: Invalid tool call inside <invoke> XML block:"
+                        f" {exc}. Ensure the 'name' attribute in "
+                        "<invoke name=\"tool_name\"> is a valid Python "
+                        "identifier and not a reserved keyword.]"
+                    )
+                )
+
             if code:
                 return ExtractionResult(
                     is_valid=True,
