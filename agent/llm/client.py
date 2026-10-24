@@ -23,11 +23,11 @@ class LLMClient:
                  max_retries: int = 5,
                  timeout_seconds: float = 60.0) -> None:
 
-        self.key_manager = KeyManager(env_file, provider_url, model_name)
+        self.key_manager = KeyManager(env_file, provider_url)
         self.api_key = self.key_manager.get_key()
-        self.api_url = self.key_manager.url.rstrip("/")
+        self.api_url = provider_url.rstrip("/")
 
-        self.model_name = self.key_manager.model_name
+        self.model_name = model_name
         self.max_retries = max_retries
         self.timeout = timeout_seconds
 
