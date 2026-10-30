@@ -8,4 +8,5 @@ SPEC.md
 PLAN.md
 RESPONSE.md
 test.py
+chat.py
 response.json
