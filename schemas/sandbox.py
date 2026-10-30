@@ -27,7 +27,8 @@ class SandboxConfig(BaseModel):
         ]
     )
     max_execution_time_seconds: int = 30
-    max_memory_mb: int = 512
+    max_memory_mb: int = 512 # Must be more than 6MB
+    max_output_bytes: int = 100 * 1024  # 100 KB
 
 
 class ExecutionResult(BaseModel):
@@ -39,6 +40,7 @@ class ExecutionResult(BaseModel):
     timed_out: bool = False
     truncated: bool = False
     is_final_answer: bool = False
+    resource_limit_exceeded: bool = True
     final_answer_value: Optional[str] = None
 
     def to_observation_string(self) -> str:
