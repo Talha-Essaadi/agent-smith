@@ -23,7 +23,7 @@ class LLMClient:
                  max_retries: int = 5,
                  timeout_seconds: float = 60.0) -> None:
 
-        self.key_manager = KeyManager(env_file, provider_url)
+        self.key_manager = KeyManager(env_file=env_file, provider_url=provider_url)
         self.api_key = self.key_manager.get_key()
         self.api_url = provider_url.rstrip("/")
 

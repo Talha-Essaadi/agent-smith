@@ -21,18 +21,6 @@ class KeyManager:
 
         self.api_keys = self._get_apis()
 
-    def _model_name(self) -> List[str]:
-        parts: List[str] = []
-        match = re.search(r"https?://([^/]+)", self.url)
-        if match:
-            domain = match.group(1)
-            parts = domain.split(".")
-
-        return [
-                p for p in parts
-                if p not in ("com", "ai", "api", "generativelanguage", "xyz")
-            ]
-
     def _local_model(self) -> str | None:
         match = re.search(
             r"https?://(?:localhost|127\.0\.0\.1)(?::\d+)?",
@@ -58,14 +46,11 @@ class KeyManager:
         if self._local_model() is not None:
             return ["local-key"]
 
-        model_names = self._model_name()
         api_keys = []
         keys = []
         for key in self.env_vars.keys():
             if "api_key" in key.lower():
-                for name in model_names:
-                    if name in key:
-                        keys.append(key)
+                keys.append(key)
 
         api_keys = self._split([self.env_vars.get(key) for key in keys])
         if not api_keys:
