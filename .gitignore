@@ -2,9 +2,11 @@
 .venv/
 __pycache__/
 sandbox/fake_sandbox.py
-# tests/
+tests/
 
 SPEC.md
 PLAN.md
 RESPONSE.md
 test.py
+chat.py
+response.json
