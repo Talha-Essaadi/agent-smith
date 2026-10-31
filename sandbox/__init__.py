@@ -1,4 +1,3 @@
-from sandbox.fake_sandbox import MockSandbox
-from sandbox.mcp_tools import add, diff
+from .sandbox import Sandbox
 
-__all__ = ["MockSandbox", "add", "diff"]
+__all__ = ["Sandbox"]
