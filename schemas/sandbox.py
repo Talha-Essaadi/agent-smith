@@ -29,6 +29,12 @@ class SandboxConfig(BaseModel):
     max_execution_time_seconds: int = 30
     max_memory_mb: int = 512 # Must be more than 6MB
     max_output_bytes: int = 100 * 1024  # 100 KB
+    tmpfs_size_mb: int = 100
+    max_disk_usage_mb: int = Field(default=100, gt=0)
+    # CPU restrictions
+    max_cpu_cores: float = Field(default=1.0, gt=0)
+    # Process restrictions
+    max_processes: int = Field(default=64, gt=0)
 
 
 class ExecutionResult(BaseModel):

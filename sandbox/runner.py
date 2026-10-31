@@ -12,7 +12,17 @@ class DockerRunner:
         self.config = config
         self.client = docker.from_env()
         self.image = "python:3.10-slim"
+        self.testbed_volume = self.client.volumes.create(
+            name=f"agent-testbed-{task_id}"
+        )
+        self.agent_volume = self.client.volumes.create(
+            name=f"agent-tmp-{task_id}" # task_id ??
+        )
 
+        self.import_guard = ImportGuard(
+            config.authorized_imports
+        )
+        self._initialize_volumes()
         self._ensure_image()
 
     def _ensure_image(self) -> None:
@@ -24,16 +34,37 @@ class DockerRunner:
             self.client.images.pull(self.image)
             print("Image pulled successfully.")
 
-    def _build_container_config(self, code: str) -> dict:
-        """Build Docker container settings."""
-        return {
-            "image": self.image,
-            "command": ["python", "-c", code],
-            "mem_limit": f"{self.config.max_memory_mb}m",
-            "network_mode": "none",
-            "detach": True,
-        }
+    def _initialize_volumes(self) -> None:
+        """Set volume ownership to the non-root sandbox user."""
+        init = self.client.containers.create(
+            image=self.config.image,
+            command=[
+                "sh", "-c",
+                "chown -R 65534:65534 /testbed /tmp/agent"
+            ],
+            user="0:0",
+            volumes={
+                self.testbed_volume.name: {
+                    "bind": "/testbed",
+                    "mode": "rw",
+                },
+                self.agent_volume.name: {
+                    "bind": "/tmp/agent",
+                    "mode": "rw",
+                },
+            },
+        )
 
+        try:
+            init.start()
+            result = init.wait(timeout=10)
+
+            if result["StatusCode"] != 0:
+                raise RuntimeError(
+                    "Failed to initialize sandbox volume permissions"
+                )
+        finally:
+            init.remove(force=True)
     def _handle_execution_timeout(
         self,
         container,
@@ -100,11 +131,48 @@ class DockerRunner:
             truncated,
         )
 
+    def _build_container_config(self, code: str) -> dict:
+        """Build Docker container settings."""
+
+        
+        return {
+            "image": self.image,
+            "command": ["python", "-c", code],
+            "working_dir": "/testbed",
+            "network_mode": "none",
+            "detach": True,
+            # Privilege restrictions
+            "user": "65534:65534",
+            "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
+            # Filesystem restrictions
+            "read_only": True,
+            "volumes": {
+                f"{self.testbed_volume.name}": {
+                    "bind": "/testbed",
+                    "mode": "rw",
+                },
+                f"{self.agent_volume.name}": {
+                    "bind": "/tmp/agent",
+                    "mode": "rw",
+                },
+            },
+            # Resource restrictions
+            "nano_cpus": int(self.config.max_cpu_cores * 1_000_000_000),
+            "pids_limit": self.config.max_processes,
+            "mem_limit": f"{self.config.max_memory_mb}m",
+            "storage_opt": {
+                "size": f"{self.config.max_disk_usage_mb}m"
+            },
+
+        }
+
     def run(self, code: str) -> ExecutionResult:
         """Execute code in an isolated container and return the result."""
         container = None
 
         try:
+            self.import_guard.validate(code)
             container = self.client.containers.create(
                 **self._build_container_config(code)
             )
@@ -148,6 +216,11 @@ class DockerRunner:
                     if result["StatusCode"] != 0
                     else None
                 ),
+            )
+        # 4 Handle unauthorized imports
+        except ImportError as e:
+            return ExecutionResult(
+                error=str(e)
             )
 
         except docker.errors.DockerException as exc:
