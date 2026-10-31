@@ -20,13 +20,11 @@ class MBPPCLI:
         )
         self.parser.add_argument(
             "--model-name", type=str,
-            required=False, help="Name of the model to use",
-            default="qwen/qwen3-235b-a22b-2507"
+            required=True, help="Name of the model to use",
         )
         self.parser.add_argument(
             "--provider-url", type=str,
-            required=False, help="Base URL of the provider",
-            default="https://openrouter.ai/api/v1"
+            required=True, help="Base URL of the provider",
         )
         self.parser.add_argument(
             "--env-file", type=str,
