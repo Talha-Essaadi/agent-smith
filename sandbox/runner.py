@@ -13,10 +13,10 @@ class DockerRunner:
         self.client = docker.from_env()
         self.image = "python:3.10-slim"
         self.testbed_volume = self.client.volumes.create(
-            name=f"agent-testbed-{task_id}"
+            name=f"agent-testbed"
         )
         self.agent_volume = self.client.volumes.create(
-            name=f"agent-tmp-{task_id}" # task_id ??
+            name=f"agent-tmp"
         )
 
         self.import_guard = ImportGuard(
@@ -167,6 +167,7 @@ class DockerRunner:
 
         }
 
+
     def run(self, code: str) -> ExecutionResult:
         """Execute code in an isolated container and return the result."""
         container = None
@@ -235,6 +236,20 @@ class DockerRunner:
                 except docker.errors.DockerException:
                     pass
 
+    def _cleanup_volumes(self) -> None:
+        """Remove task volumes."""
+
+        for volume in (self.testbed_volume, self.agent_volume):
+            if volume is not None:
+                try:
+                    volume.remove()
+                except docker.errors.DockerException:
+                    pass
+
+        self.testbed_volume = None
+        self.agent_volume = None
+
     def close(self) -> None:
         """Close the Docker client."""
+        self._cleanup_volumes()
         self.client.close()
