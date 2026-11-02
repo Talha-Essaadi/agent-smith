@@ -25,8 +25,8 @@ class DockerRunner:
         self.import_guard = ImportGuard(
             config.authorized_imports
         )
-        self._initialize_volumes()
         self._ensure_image()
+        self._initialize_volumes()
 
     def _ensure_image(self) -> None:
         """Build the Docker image from the local Dockerfile if missing."""
