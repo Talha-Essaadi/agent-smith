@@ -36,7 +36,7 @@ class AgentOrchestrator:
         total_output_tokens = 0
         total_requests = 0
         success = False
-        solution = ""
+        code_solution = ""
         last_valid_code = ""
         error_msg: Optional[str] = None
         messages = [
@@ -114,17 +114,17 @@ class AgentOrchestrator:
 
         if not success and not solution:
             if benchmark == "mbpp" and last_valid_code:
-                solution = last_valid_code
+                code_solution = last_valid_code
             if benchmark == "swebench":
                 patch_res = self.sandbox.execute("print(get_patch())")
                 if patch_res.stdout.strip():
-                    solution = patch_res.stdout.strip()
+                    code_solution = patch_res.stdout.strip()
 
         solution = SolutionOutput(
             task_id=task_id,
             benchmark=benchmark,
             success=success,
-            solution=solution,
+            solution=code_solution,
             system_prompt=system_prompt,
             iterations=len(steps),
             total_requests=total_requests,
