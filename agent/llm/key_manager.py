@@ -23,7 +23,7 @@ class KeyManager:
 
     def _local_model(self) -> str | None:
         match = re.search(
-            r"https?://(?:localhost|127\.0\.0\.1)(?::\d+)?",
+            r"http?://(?:localhost|127\.0\.0\.1)(?::\d+)?",
             self.url
         )
         if match:
