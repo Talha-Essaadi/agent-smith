@@ -8,6 +8,8 @@ from docker.errors import ImageNotFound
 from schemas.sandbox import SandboxConfig, ExecutionResult
 from typing import Optional
 from .import_guard import ImportGuard
+from pathlib import Path
+import subprocess
 
 class DockerRunner:
     def __init__(self, config: SandboxConfig) -> None:
@@ -30,21 +32,29 @@ class DockerRunner:
 
     def _ensure_image(self) -> None:
         """Build the Docker image from the local Dockerfile if missing."""
+
         try:
             self.client.images.get(self.image)
             print(f"Image {self.image} already exists.")
+            return
 
         except ImageNotFound:
-            print(f"Image {self.image} not found. Building from Dockerfile...")
+            print("Building sandbox image...")
 
-            self.client.images.build(
-                path=".",                  # Build context
-                dockerfile="sandbox/Dockerfile",   # Dockerfile path
-                tag=self.image,
-                rm=True,
+            context = Path(__file__).resolve().parent
+
+            subprocess.run(
+                [
+                    "docker", "build",
+                    "-t", self.image,
+                    "-f", str(context / "Dockerfile"),
+                    str(context),
+                ],
+                check=True,
             )
 
             print("Image built successfully.")
+
 
     def _initialize_volumes(self) -> None:
         """Set volume ownership to the non-root sandbox user."""
@@ -77,6 +87,7 @@ class DockerRunner:
                 )
         finally:
             init.remove(force=True)
+
     def _handle_execution_timeout(
         self,
         container,
