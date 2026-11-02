@@ -6,7 +6,8 @@ import json
 import tarfile
 from docker.errors import ImageNotFound
 from schemas.sandbox import SandboxConfig, ExecutionResult
-
+from typing import Optional
+from .import_guard import ImportGuard
 
 class DockerRunner:
     def __init__(self, config: SandboxConfig) -> None:
@@ -48,7 +49,7 @@ class DockerRunner:
     def _initialize_volumes(self) -> None:
         """Set volume ownership to the non-root sandbox user."""
         init = self.client.containers.create(
-            image=self.config.image,
+            image=self.image,
             command=[
                 "sh", "-c",
                 "chown -R 65534:65534 /testbed /tmp/agent"

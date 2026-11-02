@@ -2,6 +2,8 @@ from typing import List, Optional
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
+from pathlib import Path
+
 
 class SandboxConfig(BaseModel):
     """Sandbox configuration for student solutions.
