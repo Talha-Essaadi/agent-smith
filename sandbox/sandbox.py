@@ -11,7 +11,7 @@ class Sandbox(BaseSandbox):
         # Delegate execution to DockerRunner
         return self.runner.run(code)
 
-    def get_manual(self) -> str:
+    def get_manual(self, type: str) -> str:
         # Return instructions available to the agent
         return "Python execution environment."
 
