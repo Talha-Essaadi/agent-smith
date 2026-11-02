@@ -35,6 +35,20 @@ class SandboxConfig(BaseModel):
     # Process restrictions
     max_processes: int = Field(default=64, gt=0)
 
+    @classmethod
+    def load_config(cls, config: dict | str | Path | None = None) -> "SandboxConfig":
+        if config is None:
+            return cls()
+
+        if isinstance(config, dict):
+            return cls.model_validate(config)
+
+        if isinstance(config, (str, Path)):
+            with open(config, "r", encoding="utf-8") as file:
+                return cls.model_validate_json(file.read())
+
+        raise TypeError("Config must be a dictionary, JSON file path, or None.")
+
 
 class ExecutionResult(BaseModel):
     """Standardized response from Sandbox.execute(code)

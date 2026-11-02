@@ -1,7 +1,9 @@
 
 import docker
 import requests
-
+import io
+import json
+import tarfile
 from docker.errors import ImageNotFound
 from schemas.sandbox import SandboxConfig, ExecutionResult
 
@@ -26,13 +28,22 @@ class DockerRunner:
         self._ensure_image()
 
     def _ensure_image(self) -> None:
-        """Pull the Docker image if it is missing locally."""
+        """Build the Docker image from the local Dockerfile if missing."""
         try:
             self.client.images.get(self.image)
+            print(f"Image {self.image} already exists.")
+
         except ImageNotFound:
-            print(f"Image not found. Pulling {self.image}...")
-            self.client.images.pull(self.image)
-            print("Image pulled successfully.")
+            print(f"Image {self.image} not found. Building from Dockerfile...")
+
+            self.client.images.build(
+                path=".",                  # Build context
+                dockerfile="sandbox/Dockerfile",   # Dockerfile path
+                tag=self.image,
+                rm=True,
+            )
+
+            print("Image built successfully.")
 
     def _initialize_volumes(self) -> None:
         """Set volume ownership to the non-root sandbox user."""
@@ -131,15 +142,16 @@ class DockerRunner:
             truncated,
         )
 
-    def _build_container_config(self, code: str) -> dict:
+    def _build_container_config(self) -> dict:
         """Build Docker container settings."""
 
         
         return {
             "image": self.image,
-            "command": ["python", "-c", code],
+            "command": ["python", "/testbed/main.py"],
             "working_dir": "/testbed",
             "network_mode": "none",
+            "stdin_open": True,
             "detach": True,
             # Privilege restrictions
             "user": "65534:65534",
@@ -167,6 +179,19 @@ class DockerRunner:
 
         }
 
+    def _read_final_answer(self, container) -> dict:
+        """Read the final answer result from the Docker container."""
+
+        archive, _ = container.get_archive("/tmp/agent/result.json")
+
+        with tarfile.open(fileobj=io.BytesIO(b"".join(archive)), mode="r:*") as tar:
+            file = tar.extractfile("result.json")
+
+            if file is None:
+                raise FileNotFoundError("result.json not found in Docker archive")
+
+            return json.load(file)
+
 
     def run(self, code: str) -> ExecutionResult:
         """Execute code in an isolated container and return the result."""
@@ -175,9 +200,18 @@ class DockerRunner:
         try:
             self.import_guard.validate(code)
             container = self.client.containers.create(
-                **self._build_container_config(code)
+                **self._build_container_config()
             )
             container.start()
+
+            socket = container.attach_socket(
+                params={"stdin": 1, "stream": 1}
+            )
+            try:
+                socket._sock.sendall(code.encode())
+                socket._sock.shutdown(1)
+            finally:
+                socket.close()
 
             try:
                 result = container.wait(
@@ -202,21 +236,20 @@ class DockerRunner:
                 )
 
             # 3 handle truncated output restriction
+            final_result = self._read_final_answer(container)
             stdout, stderr, truncated = self._collect_output(container)
-            return ExecutionResult(
-                stdout=stdout,
-                stderr=stderr,
-                truncated=truncated,
-            )
 
             return ExecutionResult(
                 stdout=stdout,
                 stderr=stderr,
+                truncated=truncated,
                 error=(
                     f"Container exited with code {result['StatusCode']}"
                     if result["StatusCode"] != 0
                     else None
                 ),
+                is_final_answer=final_result["called"],
+                final_answer_value=final_result["value"]
             )
         # 4 Handle unauthorized imports
         except ImportError as e:
