@@ -3,8 +3,8 @@ from pathlib import Path
 
 from agent.config import AgentConfig
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
-from sandbox.sandbox import Sandbox
-from schemas import MBPPTaskInput, SolutionOutput
+from sandbox.fake_sandbox import MockSandbox
+from schemas import MBPPTaskInput, SolutionOutput, SandboxConfig
 
 
 class MBPPCLI:
@@ -20,13 +20,11 @@ class MBPPCLI:
         )
         self.parser.add_argument(
             "--model-name", type=str,
-            required=False, help="Name of the model to use",
-            default="qwen/qwen3-235b-a22b-2507"
+            required=True, help="Name of the model to use",
         )
         self.parser.add_argument(
             "--provider-url", type=str,
-            required=False, help="Base URL of the provider",
-            default="https://openrouter.ai/api/v1"
+            required=True, help="Base URL of the provider",
         )
         self.parser.add_argument(
             "--env-file", type=str,
@@ -54,7 +52,7 @@ class MBPPCLI:
             # Get limits
             limits = AgentConfig().get_limits("mbpp", self.args.max_iterations)
             # Initialize sandbox
-            sandbox = Sandbox()
+            sandbox = MockSandbox()
             # Build prompts
             system_prompt = PromptBuilder.build_mbpp_system_prompt(
                 sandbox.get_manual("mbpp"))

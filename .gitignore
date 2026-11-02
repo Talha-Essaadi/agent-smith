@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 sandbox/fake_sandbox.py
+sandbox/mcp_tools.py
 tests/
 
 SPEC.md
@@ -9,4 +10,5 @@ PLAN.md
 RESPONSE.md
 test.py
 chat.py
+test_orchestrator.py
 response.json

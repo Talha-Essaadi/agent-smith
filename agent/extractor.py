@@ -2,10 +2,10 @@ import re
 import html
 import json
 import keyword
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, model_validator
+from typing import Optional, List, Dict, Any, Tuple
 
-#  For know the block type
+# Block-type detection patterns
 PATTERNS = {
     "python": re.compile(
         r"```[ \t]*(?:python3?|py)[ \t]*\r?\n",
@@ -26,22 +26,22 @@ PATTERNS = {
     ),
 }
 
-#  For the general code block
+# Generic (untagged) code block
 _GENERIC_BLOCK_RE = re.compile(r"```\s*\n(.*?)```", re.DOTALL)
-#  For the python code block
+# Python code block
 _PYTHON_BLOCK_RE = re.compile(
     r"```(?:python3?|py)\s*\n(.*?)```", re.DOTALL | re.IGNORECASE
 )
-#  For unclosed python code block
+# Unclosed python code block
 _UNCLOSED_PYTHON_RE = re.compile(
     r"```(?:python3?|py)\s*\n(.*)$", re.DOTALL | re.IGNORECASE
 )
-#  For the JSON block
+# JSON tool call block
 _JSON_TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*(\{(?:(?!</tool_call>).)*?\})\s*(?:</tool_call>|\Z)",
     re.DOTALL | re.IGNORECASE,
 )
-#  For the XML block
+# XML invoke block
 _XML_INVOKE_RE = re.compile(
     r'<(?:\w+:)?invoke\s+name\s*=\s*["\']([^"\']+)["\']\s*'
     r'(?:/>|>(.*?)(?:</(?:\w+:)?invoke\s*>|(?=<(?:\w+:)?invoke\b)|\Z))',
@@ -52,11 +52,14 @@ _XML_PARAM_RE = re.compile(
     r'(?:</(?:\w+:)?parameter\s*>|(?=<(?:\w+:)?parameter\b)|\Z)',
     re.DOTALL | re.IGNORECASE,
 )
-# For the ReAct block
+# ReAct block
 _REACT_RE = re.compile(
     r"^[ \t]*Action[ \t]*:[ \t]*([A-Za-z_][\w.]*)[ \t]*\n"
     r"[ \t]*Action[ \t]+Input[ \t]*:\s*",
     re.IGNORECASE | re.MULTILINE,
+)
+_REACT_OBSERVATION_RE = re.compile(
+    r"^[ \t]*Observation[ \t]*:", re.MULTILINE | re.IGNORECASE
 )
 
 # Stop sequences that LLMs emit to signal end-of-generation.
@@ -66,124 +69,142 @@ _STOP_SEQUENCES: List[str] = [
     "<|im_end|>",
 ]
 
+# Message text
+_RETRY_HINT = (
+    " Please provide executable Python code inside a"
+    " ```python\n...\n``` block."
+)
+
+_UNCLOSED_WARNING = (
+    "[NOTICE: Your ```python code block was unclosed / malformed (the"
+    " closing ``` was missing or truncated; this can happen when the model"
+    " hits a stop sequence or a max-token limit mid-block). The code was"
+    " interpreted and executed anyway. To avoid this warning always close"
+    " code blocks with a standalone ``` on its own line.]"
+)
+
+_GENERIC_WARNING = (
+    "[NOTICE: A generic ``` code block without the 'python' language tag"
+    " was interpreted as Python code. Please use ```python ... ```"
+    " explicitly.]"
+)
+
+_MSG_EMPTY = "No valid code block was found in your response (response was empty)"
+
+_MSG_UNKNOWN = (
+    "No recognisable code block was found in your response. It did not"
+    " contain a ```python``` block, an <invoke> XML block, a <tool_call>"
+    " JSON block, or a ReAct Action/Action Input section"
+)
+
+_MSG_PYTHON = (
+    "A ```python``` fence was detected but no valid code could be"
+    " extracted from it"
+)
+
+_MSG_XML_UNPARSED = (
+    "An <invoke> XML block was detected but it could not be parsed. Make"
+    " sure every tool call follows the format:\n"
+    '  <invoke name="tool_name">\n'
+    '    <parameter name="arg">value</parameter>\n'
+    "  </invoke>\n"
+    "Check for unclosed tags or missing quotes around attribute values"
+)
+
+_MSG_JSON_UNPARSED = (
+    "A <tool_call> block was detected but no complete JSON object could be"
+    " found inside it (the closing </tool_call> tag or a closing brace may"
+    " be missing, e.g. truncated by a stop sequence). Make sure the full"
+    " block is present:\n"
+    "  <tool_call>\n"
+    '  {"name": "tool_name", "arguments": {"arg": "value"}}\n'
+    "  </tool_call>"
+)
+
+_MSG_REACT_UNPARSED = (
+    "A ReAct-style Action block was detected but could not be parsed. Make"
+    " sure both lines are present and contiguous:\n"
+    "  Action: tool_name\n"
+    '  Action Input: {"arg": "value"}\n'
+    "The Action Input value must be a valid JSON object"
+)
+
 
 class ExtractionResult(BaseModel):
-    """Result of extracting executable Python code from raw LLM output."""
+    """Result of extracting executable Python code from raw LLM output.
+
+    Invariants (enforced on construction):
+      * ``is_valid=True``  -> ``code`` is non-empty.
+      * ``is_valid=False`` -> ``error`` is set.
+    """
     code: str = ""
     is_valid: bool = False
     warning: Optional[str] = None
     error: Optional[str] = None
 
+    @model_validator(mode="after")
+    def _check_invariants(self) -> "ExtractionResult":
+        if self.is_valid and not self.code:
+            raise ValueError("a valid result must contain code")
+        if not self.is_valid and not self.error:
+            raise ValueError("an invalid result must contain an error")
+        return self
+
 
 def _strip_stop_sequences(text: str) -> str:
-    """Remove known LLM stop-sequences from *text*.
+    """Truncate *text* at the first known LLM stop sequence.
 
     Stop sequences are special tokens / tag strings that a model emits to
-    signal the end of its generation turn (see Anthropic docs §Stop sequences,
-    p. 27).  If they appear inside or immediately after a code / tool-call
-    block they will break every downstream regex, so we strip them first.
-
-    Only *trailing* occurrences are removed; a stop sequence that appears in
-    the middle of a response (e.g. inside a string literal) is left alone.
+    signal the end of its generation turn. Everything from the first
+    occurrence of any of them onward is discarded, since text after the
+    stop marker is not part of the intended response and would otherwise
+    break the downstream regexes.
     """
-    stripped = text
     for seq in _STOP_SEQUENCES:
-        idx = stripped.find(seq)
+        idx = text.find(seq)
         if idx != -1:
-            stripped = stripped[:idx]
-
-    return stripped
+            text = text[:idx]
+    return text
 
 
 class CodeExtractor:
-    def __init__(self) -> None:
-        pass
+    """Turns raw LLM output into executable Python code.
+
+    Every ``_*_extractor`` method returns an ``ExtractionResult`` (never
+    ``None``), so ``extract`` is pure dispatch.
+    """
 
     def extract(self, llm_output: str) -> ExtractionResult:
         if not llm_output or not llm_output.strip():
-            return ExtractionResult(
-                is_valid=False,
-                error=(
-                    "[ERROR: No valid code block was found in your response"
-                    " (response was empty)."
-                    " Please provide executable Python code inside a"
-                    " ```python ... ``` block.]"
-                ),
-            )
+            return self._fail(_MSG_EMPTY)
 
         cleaned = _strip_stop_sequences(llm_output)
-        block_type = self._detect_block_type(cleaned)
+        if not cleaned.strip():
+            return self._fail(_MSG_EMPTY)
 
-        if block_type == "python":
-            result = self._code_block_extractor(cleaned)
-        elif block_type == "xml":
-            result = self._xml_extractor(cleaned)
-        elif block_type == "json":
-            result = self._json_extractor(cleaned)
-        elif block_type == "react":
-            result = self._react_extractor(cleaned)
-        else:
-            result = None
-
-        if result is not None:
-            return result
-
-        if block_type == "unknown":
-            result = self._generic_extractor(cleaned)
-            if result:
-                return result
-            return ExtractionResult(
-                is_valid=False,
-                error=(
-                    "[ERROR: No recognisable code block was found in your"
-                    " response. The response did not contain a ```python```"
-                    " block, an <invoke> XML block, a <tool_call> JSON block,"
-                    " or a ReAct Action/Action Input section."
-                    " Please provide executable Python code inside a"
-                    " ```python\n...\n``` block.]"
-                ),
-            )
-
-        # A recognised format marker was present but extraction still failed.
-        _format_hints: Dict[str, str] = {
-            "python": (
-                "a ```python``` fence was detected but no valid code could be"
-                " extracted from it"
-            ),
-            "xml": (
-                "an <invoke> XML block was detected but it could not be"
-                " parsed — check that every <invoke name=\"...\"> tag is"
-                " properly closed with </invoke> and that parameter values"
-                " are wrapped in <parameter name=\"...\">...</parameter>"
-            ),
-            "json": (
-                "a <tool_call> JSON block was detected but it could not be"
-                " parsed — check that the JSON object inside <tool_call>…"
-                "</tool_call> is well-formed and contains \"name\" and"
-                " \"arguments\" keys"
-            ),
-            "react": (
-                "a ReAct Action/Action Input section was detected but the"
-                " Action Input value could not be parsed as JSON — make sure"
-                " the value on the Action Input line is a valid JSON object"
-                " e.g. {\"arg\": \"value\"}"
-            ),
+        extractors = {
+            "python": self._py_block_extractor,
+            "xml": self._xml_extractor,
+            "json": self._json_extractor,
+            "react": self._react_extractor,
+            "unknown": self._generic_extractor,
         }
-        hint = _format_hints.get(
-            block_type,
-            "the detected block was malformed"
-        )
+        return extractors[self._detect_block_type(cleaned)](cleaned)
+
+    @staticmethod
+    def _ok(code: str, warning: Optional[str] = None) -> ExtractionResult:
+        return ExtractionResult(is_valid=True, code=code, warning=warning)
+
+    @staticmethod
+    def _fail(msg: str) -> ExtractionResult:
         return ExtractionResult(
             is_valid=False,
-            error=(
-                f"[ERROR: Could not extract executable code from your"
-                f" response: {hint}."
-                f" Please provide executable Python code inside a"
-                f" ```python\n...\n``` block.]"
-            ),
+            error=f"[ERROR: {msg}.{_RETRY_HINT}]",
         )
 
-    def _detect_block_type(self, llm_output: str) -> str:
+    @staticmethod
+    def _detect_block_type(llm_output: str) -> str:
+        """Return the format whose marker appears earliest in the text."""
         best, best_pos = "unknown", None
         for output_type, pattern in PATTERNS.items():
             m = pattern.search(llm_output)
@@ -191,173 +212,102 @@ class CodeExtractor:
                 best, best_pos = output_type, m.start()
         return best
 
-    def _code_block_extractor(self,
-                              llm_output: str) -> Optional[ExtractionResult]:
+    def _py_block_extractor(self, llm_output: str) -> ExtractionResult:
         py_blocks = _PYTHON_BLOCK_RE.findall(llm_output)
-        if py_blocks:
-            code = "\n\n".join(m.strip() for m in py_blocks if m.strip())
-            if code:
-                return ExtractionResult(
-                    is_valid=True,
-                    code=code,
-                )
-
-        unclosed_blocks = _UNCLOSED_PYTHON_RE.search(llm_output)
-        if unclosed_blocks:
-            code = unclosed_blocks.group(1).strip()
-            code = re.sub(r"`+$", "", code).strip()
-            if code:
-                return ExtractionResult(
-                    is_valid=True,
-                    code=code,
-                    warning=(
-                        "[NOTICE: Your ```python code block was unclosed /"
-                        " malformed (the closing ``` was missing or truncated"
-                        " — this can happen when the model hits a stop"
-                        " sequence or a max-token limit mid-block)."
-                        " The code was interpreted and executed anyway."
-                        " To avoid this warning always close code blocks"
-                        " with a standalone ``` on its own line.]"
-                    ),
-                )
-        return None
-
-    def _xml_extractor(self, llm_output: str) -> Optional[ExtractionResult]:
-        xml_blocks = _XML_INVOKE_RE.findall(llm_output)
-        if xml_blocks:
-            try:
-                code = self._convert_xml(xml_blocks)
-            except ValueError as exc:
-                return ExtractionResult(
-                    is_valid=False,
-                    error=(
-                        "[ERROR: Invalid tool call inside <invoke> XML block:"
-                        f" {exc}. Ensure the 'name' attribute in "
-                        "<invoke name=\"tool_name\"> is a valid Python "
-                        "identifier and not a reserved keyword.]"
-                    )
-                )
-
-            if code:
-                return ExtractionResult(
-                    is_valid=True,
-                    code=code,
-                )
-
-        return ExtractionResult(
-            is_valid=False,
-            error=(
-                "[ERROR: An <invoke> XML block was detected in your response"
-                " but it could not be parsed."
-                " Make sure every tool call follows the format:\n"
-                "  <invoke name=\"tool_name\">\n"
-                "    <parameter name=\"arg\">value</parameter>\n"
-                "  </invoke>\n"
-                "Check for unclosed tags or missing quotes around attribute"
-                " values.]"
-            ),
-        )
-
-    def _json_extractor(self, llm_output: str) -> Optional[ExtractionResult]:
-        json_blocks = _JSON_TOOL_CALL_RE.findall(llm_output)
-        if json_blocks:
-            try:
-                code = self._convert_json(json_blocks)
-            except (json.JSONDecodeError, KeyError) as exc:
-                return ExtractionResult(
-                    is_valid=False,
-                    error=(
-                        f"[ERROR: Malformed JSON inside <tool_call>: {exc}."
-                        " The JSON object must be well-formed and contain"
-                        " both a \"name\" (string) key and an \"arguments\""
-                        " (object) key, e.g.:\n"
-                        "  <tool_call>\n"
-                        "  {\"name\": \"tool_name\","
-                        " \"arguments\": {\"arg\": \"value\"}}\n"
-                        "  </tool_call>]"
-                    ),
-                )
-            if code:
-                return ExtractionResult(
-                    is_valid=True,
-                    code=code,
-                )
-
-        return ExtractionResult(
-            is_valid=False,
-            error=(
-                "[ERROR: A <tool_call> block was detected but could not be"
-                " extracted — the closing </tool_call> tag may be missing"
-                " (e.g. truncated by a stop sequence)."
-                " Make sure the full block is present:\n"
-                "  <tool_call>\n"
-                "  {\"name\": \"tool_name\","
-                " \"arguments\": {\"arg\": \"value\"}}\n"
-                "  </tool_call>]"
-            ),
-        )
-
-    def _react_extractor(self, llm_output: str) -> Optional[ExtractionResult]:
-        llm_output = re.split(r"^[ \t]*Observation[ \t]*:", llm_output,
-                              maxsplit=1,
-                              flags=re.MULTILINE | re.IGNORECASE)[0]
-        react_blocks = []
-        try:
-            for m in _REACT_RE.finditer(llm_output):
-                value, _ = json.JSONDecoder().raw_decode(llm_output, m.end())
-                react_blocks.append((m.group(1), value))
-            code = self._convert_react(react_blocks) if react_blocks else ""
-        except ValueError as exc:
-            return ExtractionResult(
-                is_valid=False,
-                error=(
-                    f"[ERROR: Invalid ReAct Action / Action Input: {exc}."
-                    " ...]"
-                ),
-            )
-
+        code = "\n\n".join(b.strip() for b in py_blocks if b.strip())
         if code:
-            return ExtractionResult(
-                is_valid=True,
-                code=code,
+            return self._ok(code)
+
+        unclosed = _UNCLOSED_PYTHON_RE.search(llm_output)
+        if unclosed:
+            code = re.sub(r"`+$", "", unclosed.group(1).strip()).strip()
+            if code:
+                return self._ok(code, warning=_UNCLOSED_WARNING)
+
+        return self._fail(_MSG_PYTHON)
+
+    def _xml_extractor(self, llm_output: str) -> ExtractionResult:
+        blocks = _XML_INVOKE_RE.findall(llm_output)
+        if not blocks:
+            return self._fail(_MSG_XML_UNPARSED)
+
+        try:
+            code = self._convert_xml(blocks)
+        except ValueError as exc:
+            return self._fail(
+                f"Invalid tool call inside <invoke> XML block: {exc}."
+                " Ensure the 'name' attribute in <invoke name=\"tool_name\">"
+                " is a valid Python identifier and not a reserved keyword"
             )
 
-        return ExtractionResult(
-            is_valid=False,
-            error=(
-                "[ERROR: A ReAct-style Action block was detected but could"
-                " not be parsed. Make sure both lines are present and"
-                " contiguous:\n"
-                "  Action: tool_name\n"
-                "  Action Input: {\"arg\": \"value\"}\n"
-                "The Action Input value must be a valid JSON object on the"
-                " same line (or with no blank lines between the two).]"
-            ),
-        )
+        return self._ok(code) if code else self._fail(_MSG_XML_UNPARSED)
 
-    def _generic_extractor(self,
-                           llm_output: str) -> Optional[ExtractionResult]:
+    def _json_extractor(self, llm_output: str) -> ExtractionResult:
+        blocks = _JSON_TOOL_CALL_RE.findall(llm_output)
+        if not blocks:
+            return self._fail(_MSG_JSON_UNPARSED)
+
+        try:
+            code = self._convert_json(blocks)
+        except (ValueError, KeyError, TypeError) as exc:
+            # json.JSONDecodeError is a subclass of ValueError.
+            return self._fail(
+                f"Malformed JSON inside <tool_call>: {exc!r}. The JSON"
+                " object must be well-formed and contain a \"name\" (string)"
+                " key and an \"arguments\" (object) key, e.g.:\n"
+                "  <tool_call>\n"
+                '  {"name": "tool_name", "arguments": {"arg": "value"}}\n'
+                "  </tool_call>"
+            )
+
+        return self._ok(code) if code else self._fail(_MSG_JSON_UNPARSED)
+
+    def _react_extractor(self, llm_output: str) -> ExtractionResult:
+        # Anything after the first "Observation:" is hallucinated tool output.
+        text = _REACT_OBSERVATION_RE.split(llm_output, maxsplit=1)[0]
+
+        blocks: List[Tuple[str, Any]] = []
+        try:
+            decoder = json.JSONDecoder()
+            for m in _REACT_RE.finditer(text):
+                value, _ = decoder.raw_decode(text, m.end())
+                blocks.append((m.group(1), value))
+            code = self._convert_react(blocks) if blocks else ""
+        except (ValueError, TypeError) as exc:
+            return self._fail(
+                f"Invalid ReAct Action / Action Input: {exc}."
+                " The Action Input value must be a valid JSON object, e.g."
+                ' {"arg": "value"}'
+            )
+
+        return self._ok(code) if code else self._fail(_MSG_REACT_UNPARSED)
+
+    def _generic_extractor(self, llm_output: str) -> ExtractionResult:
         gen_blocks = _GENERIC_BLOCK_RE.findall(llm_output)
-        if gen_blocks:
-            code = "\n\n".join(m.strip() for m in gen_blocks if m.strip())
-            if code:
-                return ExtractionResult(
-                    is_valid=True,
-                    code=code,
-                    warning="[NOTICE: A generic ``` code block without "
-                            "the 'python' language tag was interpreted"
-                            " as Python code. Please use ```python ... ```"
-                            " explicitly.]"
-                )
+        code = "\n\n".join(b.strip() for b in gen_blocks if b.strip())
+        if code:
+            return self._ok(code, warning=_GENERIC_WARNING)
+        return self._fail(_MSG_UNKNOWN)
 
-        return None
+    # ------------------------------------------------------------------
+    # Converters (raise ValueError / KeyError / TypeError on bad input)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_kwargs(kwargs: Any) -> Dict[str, Any]:
+        """Coerce a parsed 'arguments' value into a dict of kwargs."""
+        if isinstance(kwargs, str):
+            kwargs = json.loads(kwargs)
+        if kwargs is None:
+            return {}
+        if not isinstance(kwargs, dict):
+            raise ValueError("arguments must be a JSON object")
+        return kwargs
 
     def _convert_xml(self, blocks: List[Any]) -> str:
         lines: List[str] = []
         for func_name, body in blocks:
-            params = _XML_PARAM_RE.findall(body)
             kwargs: Dict[str, Any] = {}
-            for k, v in params:
+            for k, v in _XML_PARAM_RE.findall(body):
                 val_str = v[1:] if v.startswith("\n") else v
                 val_str = val_str[:-1] if val_str.endswith("\n") else val_str
                 val_str = html.unescape(val_str)
@@ -371,55 +321,40 @@ class CodeExtractor:
             lines.append(self._to_py(func_name, kwargs))
         return "\n".join(lines)
 
-    def _convert_json(self, blocks: List[Any]) -> str:
+    def _convert_json(self, blocks: List[str]) -> str:
         lines: List[str] = []
         for block in blocks:
-            json_block = json.loads(block)
-            func_name = json_block["name"]
-
-            kwargs = json_block.get(
-                "arguments",
-                json_block.get("parameters", {})
+            data = json.loads(block)
+            func_name = data["name"]
+            raw_kwargs = data.get("arguments", data.get("parameters"))
+            lines.append(
+                self._to_py(func_name, self._normalize_kwargs(raw_kwargs))
             )
-            if isinstance(kwargs, str):
-                kwargs = json.loads(kwargs)
-            if kwargs is None:
-                kwargs = {}
-            if not isinstance(kwargs, dict):
-                raise ValueError('Action Input must be a JSON object')
-            lines.append(self._to_py(func_name, kwargs))
         return "\n".join(lines)
 
-    def _convert_react(self, blocks: List[Any]) -> str:
-        lines: List[str] = []
-        for func_name, kwargs in blocks:
-            if isinstance(kwargs, str):
-                kwargs = json.loads(kwargs)
-            if kwargs is None:
-                kwargs = {}
-            if not isinstance(kwargs, dict):
-                raise ValueError('"arguments" must be a JSON object')
-            lines.append(self._to_py(func_name, kwargs))
-        return "\n".join(lines)
+    def _convert_react(self, blocks: List[Tuple[str, Any]]) -> str:
+        return "\n".join(
+            self._to_py(func_name, self._normalize_kwargs(kwargs))
+            for func_name, kwargs in blocks
+        )
 
-    def _to_py(self, func_name: str, kwargs: Dict[str, Any]) -> str:
-        """Converts a tool name and dictionary of
-         arguments into a valid Python call string."""
-        if not isinstance(func_name, str) \
-                or not re.fullmatch(r"[A-Za-z_]\w*", func_name) \
-                or keyword.iskeyword(func_name):
+    @staticmethod
+    def _to_py(func_name: str, kwargs: Dict[str, Any]) -> str:
+        """Convert a tool name and dict of arguments into a Python call."""
+        if (not isinstance(func_name, str)
+                or not re.fullmatch(r"[A-Za-z_]\w*", func_name)
+                or keyword.iskeyword(func_name)):
             raise ValueError(f"{func_name!r} is not a valid tool name")
 
         good = {k: v for k, v in kwargs.items()
                 if (isinstance(k, str) and k.isidentifier()
-                    and not keyword.iskeyword(k))
-                }
+                    and not keyword.iskeyword(k))}
         bad = {k: v for k, v in kwargs.items() if k not in good}
 
         args = ", ".join(f"{k}={v!r}" for k, v in good.items())
         if bad:
             args += (", " if args else "") + f"**{bad!r}"
-        func_call = f"{func_name}({args})"
+
         if func_name == "final_answer" and len(kwargs) == 1:
-            return f"{func_name}({repr(list(kwargs.values())[0])})"
-        return f"result = {func_call}\nprint(result)"
+            return f"{func_name}({list(kwargs.values())[0]!r})"
+        return f"result = {func_name}({args})\nprint(result)"

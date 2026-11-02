@@ -3,7 +3,7 @@ from pathlib import Path
 
 from agent.config import AgentConfig
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
-# from sandbox.fake_sandbox import MockSandbox
+from sandbox.fake_sandbox import MockSandbox
 from schemas import SWEBenchTaskInput, SolutionOutput
 
 
@@ -21,12 +21,10 @@ class SWEBenchCLI:
         self.parser.add_argument(
             "--model-name", type=str,
             required=False, help="Name of the model to use",
-            default="qwen/qwen3-235b-a22b-2507"
         )
         self.parser.add_argument(
             "--provider-url", type=str,
             required=False, help="Base URL of the provider",
-            default="https://openrouter.ai/api/v1"
         )
         self.parser.add_argument(
             "--env-file", type=str,
@@ -55,7 +53,7 @@ class SWEBenchCLI:
             limits = AgentConfig().get_limits("swebench",
                                               self.args.max_iterations)
             # Initialize sandbox
-            # sandbox = MockSandbox()
+            sandbox = MockSandbox()
             # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
                 sandbox.get_manual())
