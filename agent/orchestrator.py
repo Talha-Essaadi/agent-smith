@@ -104,7 +104,7 @@ class AgentOrchestrator:
 
             if is_final:
                 success = True
-                solution = exec_res.final_answer_value or ""
+                code_solution = exec_res.final_answer_value or ""
                 error_msg = None
                 break
             else:
@@ -112,7 +112,7 @@ class AgentOrchestrator:
                     {"role": "user",
                      "content": f"Observation:\n{sandbox_output}"})
 
-        if not success and not solution:
+        if not success and not code_solution:
             if benchmark == "mbpp" and last_valid_code:
                 code_solution = last_valid_code
             if benchmark == "swebench":
