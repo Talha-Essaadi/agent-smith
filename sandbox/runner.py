@@ -182,12 +182,12 @@ class DockerRunner:
                 },
             },
             # Resource restrictions
-            "nano_cpus": int(self.config.max_cpu_cores * 1_000_000_000),
+            # "nano_cpus": int(self.config.max_cpu_cores * 1_000_000_000),
             "pids_limit": self.config.max_processes,
             "mem_limit": f"{self.config.max_memory_mb}m",
-            "storage_opt": {
-                "size": f"{self.config.max_disk_usage_mb}m"
-            },
+            # "storage_opt": {
+            #     "size": f"{self.config.max_disk_usage_mb}m"
+            # },
 
         }
 

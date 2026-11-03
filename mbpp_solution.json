@@ -8,8 +8,8 @@
   "total_requests": 0,
   "total_input_tokens": 0,
   "total_output_tokens": 0,
-  "total_time_seconds": 31.157676913309842,
+  "total_time_seconds": 0.2760158032178879,
   "steps": [],
-  "error": "LLM API failed after 6 attempts: Request URL is missing an 'http://' or 'https://' protocol.",
-  "timestamp": "2026-11-02T13:02:39.831805"
+  "error": "No API key still works",
+  "timestamp": "2026-11-02T14:28:52.898412"
 }
