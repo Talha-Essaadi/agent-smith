@@ -1,4 +1,4 @@
-from schemas.sandbox import BaseSandbox, SandboxConfig, ExecutionResult
+from schemas import BaseSandbox, SandboxConfig, ExecutionResult
 from sandbox.runner import DockerRunner
 
 

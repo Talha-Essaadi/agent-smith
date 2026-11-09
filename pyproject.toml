@@ -8,8 +8,19 @@ dependencies = [
     "docker>=7.2.0",
     "flake8>=7.4.1",
     "httpx[cli]>=0.28.1",
+    "mcp>=2.3.0",
     "pydantic>=2.14.1",
     "pytest>=9.1.1",
     "python-dotenv>=1.2.4",
     "requests>=2.34.2",
 ]
+
+
+[project.scripts]
+sandbox = "sandbox.cli:main"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sandbox", "schemas", "swebench_tools"]
