@@ -3,7 +3,7 @@ from pathlib import Path
 
 from agent.config import AgentConfig
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
-from sandbox import Sandbox
+from sandbox import Sandbox, MCPManager
 from schemas import MBPPTaskInput, SolutionOutput, SandboxConfig
 
 
@@ -53,7 +53,8 @@ class MBPPCLI:
             limits = AgentConfig().get_limits("mbpp", self.args.max_iterations)
             # Initialize sandbox
             sandbox_config = SandboxConfig()
-            sandbox = Sandbox(sandbox_config)
+            manager = MCPManager()
+            sandbox = Sandbox(sandbox_config, manager)
             # Build prompts
             system_prompt = PromptBuilder.build_mbpp_system_prompt(
                 sandbox.get_manual("mbpp"))

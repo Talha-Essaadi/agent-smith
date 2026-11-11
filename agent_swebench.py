@@ -3,7 +3,7 @@ from pathlib import Path
 
 from agent.config import AgentConfig
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
-from sandbox.fake_sandbox import MockSandbox
+from sandbox import Sandbox, MCPManager
 from schemas import SWEBenchTaskInput, SolutionOutput
 
 
@@ -53,7 +53,7 @@ class SWEBenchCLI:
             limits = AgentConfig().get_limits("swebench",
                                               self.args.max_iterations)
             # Initialize sandbox
-            sandbox = MockSandbox()
+            sandbox = Sandbox()
             # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
                 sandbox.get_manual())

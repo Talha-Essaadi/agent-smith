@@ -6,8 +6,8 @@ import shlex
 from pathlib import Path
 
 from schemas.sandbox import SandboxConfig
-from sandbox.mcp_client import MCPClient
-from sandbox.runner import DockerRunner
+from sandbox.mcp_manager import MCPManager
+from sandbox.sandbox import Sandbox
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,10 +62,10 @@ def load_config(path: str | None) -> SandboxConfig:
 
 
 async def connect_mcp(
-    client: MCPClient,
+    manager: MCPManager,
     args: argparse.Namespace,
 ) -> bool:
-    """Connect to the requested MCP server."""
+    """Connect to MCP server and register its tools."""
 
     if args.mcp_stdio:
         parts = shlex.split(args.mcp_stdio)
@@ -73,13 +73,17 @@ async def connect_mcp(
         if not parts:
             raise ValueError("Empty MCP stdio command")
 
-        await client.connect_stdio(
+        await manager.connect_stdio(
+            server_name="stdio",
             command=parts[0],
             args=parts[1:],
         )
 
     elif args.mcp_server:
-        await client.connect_http(args.mcp_server)
+        await manager.connect_http(
+            server_name="remote",
+            url=args.mcp_server,
+        )
 
     else:
         return False
@@ -87,7 +91,27 @@ async def connect_mcp(
     return True
 
 
-async def interactive_loop(runner: DockerRunner) -> None:
+def display_tools(manager: MCPManager) -> None:
+    """Display registered MCP tools."""
+
+    tools = manager.registry.list_tools()
+
+    if not tools:
+        print("No MCP tools registered.")
+        return
+
+    print(f"Available MCP tools ({len(tools)}):")
+
+    for tool in tools:
+        print(f"  - {tool.name}")
+        if tool.description:
+            print(f"    {tool.description}")
+
+
+async def interactive_loop(
+    sandbox: Sandbox,
+    manager: MCPManager,
+) -> None:
     """Read Python code from the terminal and execute it."""
 
     print("Agent Smith Sandbox")
@@ -98,25 +122,34 @@ async def interactive_loop(runner: DockerRunner) -> None:
     while True:
         try:
             code = await asyncio.to_thread(
-                input,
-                "sandbox> ",
+                input, "sandbox> "
             )
-
         except (EOFError, KeyboardInterrupt):
-            print()
+            print("\nInterrupted.")
             break
 
-        if code.strip() in (":exit", ":quit"):
+        command = code.strip()
+
+        if command in (":exit", ":quit"):
             break
 
-        if not code.strip():
+        if command == ":tools":
+            display_tools(manager)
+            continue
+
+        if not command:
             continue
 
         # Execute Python code inside Docker.
-        result = await asyncio.to_thread(
-            runner.run,
-            code,
-        )
+        print("Executing code...")
+
+        try:
+            result = await asyncio.to_thread(
+                sandbox.execute, code
+            )
+        except Exception as exc:
+            print(f"Execution error: {exc}")
+            continue
 
         if result.stdout:
             print(result.stdout, end="")
@@ -142,35 +175,40 @@ async def interactive_loop(runner: DockerRunner) -> None:
 
 
 async def async_main() -> None:
-    """Initialize sandbox, MCP connection, and interactive CLI."""
+    """Initialize sandbox, MCP manager, and interactive CLI."""
 
     args = parse_args()
 
     config = load_config(args.config)
 
-    runner = DockerRunner(config)
+    manager = MCPManager()
 
-    client = MCPClient()
+    runner = Sandbox(config, manager)
+
 
     try:
-        connected = await connect_mcp(client, args)
+        connected = await connect_mcp(manager, args)
 
         if connected:
-            tools = await client.list_tools()
+            tools = manager.registry.list_tools()
 
-            print(f"Connected to MCP server ({len(tools)} tools)")
+            print(
+                f"Connected to MCP server "
+                f"({len(tools)} tools registered)"
+            )
 
             for tool in tools:
                 print(f"  - {tool.name}")
 
-        await interactive_loop(runner)
+        await interactive_loop(runner, manager)
 
     finally:
-        await client.close()
+        await manager.close()
 
 
 def main() -> None:
     """Synchronous entry point for pyproject.toml."""
+
     try:
         asyncio.run(async_main())
 
