@@ -1,10 +1,11 @@
+import os
 import argparse
 from pathlib import Path
 
 from agent.config import AgentConfig
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
 from sandbox import Sandbox, MCPManager
-from schemas import SWEBenchTaskInput, SolutionOutput
+from schemas import SWEBenchTaskInput, SolutionOutput, SandboxConfig
 
 
 class SWEBenchCLI:
@@ -20,11 +21,15 @@ class SWEBenchCLI:
         )
         self.parser.add_argument(
             "--model-name", type=str,
-            required=False, help="Name of the model to use",
+            required=False,
+            default=os.getenv("MODEL_NAME"),
+            help="Name of the model to use",
         )
         self.parser.add_argument(
             "--provider-url", type=str,
-            required=False, help="Base URL of the provider",
+            required=False,
+            default=os.getenv("PROVIDER_URL"),
+            help="Base URL of the provider",
         )
         self.parser.add_argument(
             "--env-file", type=str,
@@ -53,10 +58,12 @@ class SWEBenchCLI:
             limits = AgentConfig().get_limits("swebench",
                                               self.args.max_iterations)
             # Initialize sandbox
-            sandbox = Sandbox()
+            sandbox_config = SandboxConfig()
+            mcp_manager = MCPManager()
+            sandbox = Sandbox(sandbox_config, mcp_manager)
             # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
-                sandbox.get_manual())
+                sandbox.get_manual("swebench"))
             user_prompt = PromptBuilder.build_swebench_user_prompt(task)
             # Initialize llm client
             llm_client = LLMClient(model_name=self.args.model_name,
