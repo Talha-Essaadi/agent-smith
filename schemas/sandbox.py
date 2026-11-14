@@ -61,7 +61,6 @@ class ExecutionResult(BaseModel):
     timed_out: bool = False
     truncated: bool = False
     is_final_answer: bool = False
-    resource_limit_exceeded: bool = True
     final_answer_value: Optional[str] = None
 
     def to_observation_string(self) -> str:

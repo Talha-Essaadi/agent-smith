@@ -59,9 +59,9 @@ class SandboxSecurity:
 
     def make_safe_open(self) -> Callable:
         def is_allowed(file: str):
-            return (file in self.allowed_directories
+            return (file in self.allowed_dirs
                     or any(file.startswith(dir.rstrip("/") + os.sep)
-                           for dir in self.allowed_directories))
+                           for dir in self.allowed_dirs))
 
         def _safe_open(file, mode="r", *args, **kwargs):
             if isinstance(file, int):
