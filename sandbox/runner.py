@@ -133,7 +133,8 @@ class DockerRunner:
 
     def _collect_output(self, container) -> tuple[str, str, bool]:
         """Collect stdout/stderr from the container and apply byte limits."""
-        stdout, stderr = container.logs(stdout=True, stderr=True, stream=False, demux=True)
+        stdout = container.logs(stdout=True, stderr=False, stream=False)
+        stderr = container.logs(stdout=False, stderr=True, stream=False)
         stdout = stdout or b""
         stderr = stderr or b""
         max_bytes = self.config.max_output_bytes

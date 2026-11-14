@@ -8,6 +8,7 @@ from pathlib import Path
 from schemas.sandbox import SandboxConfig
 from sandbox.mcp_manager import MCPManager
 from sandbox.sandbox import Sandbox
+from aioconsole import ainput
 
 
 def parse_args() -> argparse.Namespace:
@@ -121,9 +122,9 @@ async def interactive_loop(
 
     while True:
         try:
-            code = await asyncio.to_thread(
-                input, "sandbox> "
-            )
+            # Read input directly without creating a worker thread.
+            code = await ainput("sandbox> ")
+
         except (EOFError, KeyboardInterrupt):
             print("\nInterrupted.")
             break
@@ -140,13 +141,23 @@ async def interactive_loop(
         if not command:
             continue
 
-        # Execute Python code inside Docker.
         print("Executing code...")
 
         try:
+            # Docker SDK operations are blocking.
             result = await asyncio.to_thread(
-                sandbox.execute, code
+                sandbox.execute,
+                code,
             )
+
+        except asyncio.CancelledError:
+            print("\nExecution interrupted.")
+            raise
+
+        except KeyboardInterrupt:
+            print("\nInterrupted.")
+            break
+
         except Exception as exc:
             print(f"Execution error: {exc}")
             continue
