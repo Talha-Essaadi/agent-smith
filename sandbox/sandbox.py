@@ -7,12 +7,21 @@ class Sandbox(BaseSandbox):
     def __init__(self, config: SandboxConfig, mcp_manager: MCPManager) -> None:
         self.config = config
         self.mcp_manager = mcp_manager
-        self._runner = DockerRunner(config)
+        self._runner = DockerRunner(config, mcp_manager)
         # self.tool_registry = self._runner.tool_registry
 
-    def execute(self, code: str) -> ExecutionResult:
-        # Delegate execution to DockerRunner
-        return self._runner.run(code)
+    async def execute(self, code: str) -> ExecutionResult:
+        tools = self.mcp_manager.list_tools()
+
+        discovered_tool_names = [
+            tool.name
+            for tool in tools
+        ]
+        print(f"[DEBUG] Discovered tools: {discovered_tool_names}")
+        return await self._runner.run(
+            code,
+            discovered_tool_names,
+        )
 
     def get_manual(self, type: str) -> str:
         # Return instructions available to the agent

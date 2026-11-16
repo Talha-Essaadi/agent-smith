@@ -1,8 +1,6 @@
 
 import docker
-import requests
 import io
-import json
 import tarfile
 from docker.errors import ImageNotFound
 from schemas.sandbox import SandboxConfig, ExecutionResult
@@ -12,13 +10,37 @@ from pathlib import Path
 import subprocess
 import traceback
 import logging
+import asyncio
+import json
+import select
+import time
+
+
+def _extract_frames(buffer: bytearray):
+    frames = []
+
+    while len(buffer) >= 8:
+        stream_id = buffer[0]
+        length = int.from_bytes(buffer[4:8], "big")
+
+        if len(buffer) < 8 + length:
+            break
+
+        payload = bytes(buffer[8:8 + length])
+        del buffer[:8 + length]
+
+        frames.append((stream_id, payload))
+
+    return frames
+
+
 
 class DockerRunner:
-    def __init__(self, config: SandboxConfig) -> None:
+    def __init__(self, config: SandboxConfig, mcp_manager=None) -> None:
         """Store configuration and initialize the Docker client."""
         self.config = config
         self.client = docker.from_env()
-        self.image = "python:3.10-slim"  # DEBUG: verify /testbed/main.py exists in mounted volume
+        self.image = "agent-sandbox:latest"  # DEBUG: verify /testbed/main.py exists in mounted volume
         self.testbed_volume = self.client.volumes.create(
             name=f"agent-testbed"
         )
@@ -31,6 +53,7 @@ class DockerRunner:
         )
         self._ensure_image()
         self._initialize_volumes()
+        self.mcp_manager = mcp_manager
 
     def _ensure_image(self) -> None:
         """Build the Docker image from the local Dockerfile if missing."""
@@ -44,13 +67,14 @@ class DockerRunner:
             print("Building sandbox image...")
 
             context = Path(__file__).resolve().parent
+            repository_root = context.parent
 
             subprocess.run(
                 [
                     "docker", "build",
                     "-t", self.image,
                     "-f", str(context / "Dockerfile"),
-                    str(context),
+                    str(repository_root),
                 ],
                 check=True,
             )
@@ -90,24 +114,35 @@ class DockerRunner:
         finally:
             init.remove(force=True)
 
-    def _handle_execution_timeout(
-        self,
-        container,
-        exc: Exception,
-    ) -> ExecutionResult:
-        """Handle execution timeout or Docker communication failure."""
-        print("[DEBUG] Docker wait failed:", repr(exc), flush=True)
-        traceback.print_exception(type(exc), exc, exc.__traceback__)
-        self._debug_container(container)
+    def _handle_execution_timeout(self, container) -> ExecutionResult:
+        """Stop an execution that exceeded its configured wall-clock deadline."""
         try:
             container.kill()
-        except docker.errors.DockerException as kill_exc:
-            print("[DEBUG] Kill failed:", repr(kill_exc), flush=True)
+        except docker.errors.NotFound:
+            pass
+        except docker.errors.DockerException as exc:
+            logging.warning("Could not kill timed-out container: %s", exc)
 
         return ExecutionResult(
-            error=f"Execution timed out or Docker communication failed: {exc}",
+            error="Execution timed out.",
             timed_out=True,
         )
+
+    def _wait_for_execution(self, container) -> dict:
+        """Poll container state against a real monotonic deadline.
+
+        Docker's container.wait(timeout=...) sets an HTTP request timeout;
+        it is not itself a reliable execution timer.
+        """
+        deadline = time.monotonic() + self.config.max_execution_time_seconds
+        while True:
+            container.reload()
+            state = container.attrs["State"]
+            if not state.get("Running", False):
+                return {"StatusCode": state.get("ExitCode", 1)}
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Sandbox execution deadline exceeded")
+            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
 
     def _handle_memory_limit(self, container) -> Optional[ExecutionResult]:
         """Check whether the container exceeded its memory limit."""
@@ -222,7 +257,7 @@ class DockerRunner:
             connection.close()
 
     def _debug_container(self, container) -> None:
-        """Best-effort diagnostics; never hide the original exception."""
+        """Best-effort diagnostics without masking the original error."""
         if container is None:
             return
         print(f"[DEBUG] Container ID: {container.id}", flush=True)
@@ -231,16 +266,162 @@ class DockerRunner:
             print("[DEBUG] State:", container.attrs.get("State"), flush=True)
             print("[DEBUG] Image:", container.attrs.get("Config", {}).get("Image"), flush=True)
             print("[DEBUG] Command:", container.attrs.get("Config", {}).get("Cmd"), flush=True)
-        except Exception as exc:
+        except docker.errors.DockerException as exc:
             print("[DEBUG] Inspect failed:", repr(exc), flush=True)
         try:
-            out, err = container.logs(stdout=True, stderr=True, demux=True)
+            out = container.logs(stdout=True, stderr=False)
+            err = container.logs(stdout=False, stderr=True)
             print("[DEBUG] STDOUT:", (out or b"").decode(errors="replace")[-4000:], flush=True)
             print("[DEBUG] STDERR:", (err or b"").decode(errors="replace")[-4000:], flush=True)
-        except Exception as exc:
+        except docker.errors.DockerException as exc:
             print("[DEBUG] Logs failed:", repr(exc), flush=True)
 
-    def run(self, code: str) -> ExecutionResult:
+
+    async def _dispatch_tool_request(self, request: dict) -> dict:
+        request_id = request["id"]
+
+        try:
+            if self.mcp_manager is None:
+                raise RuntimeError("MCP manager not configured")
+
+            tool_name = request["name"]
+            arguments = request.get("arguments", {})
+
+            # 1. Execute the MCP tool
+            result = await self.mcp_manager.call_tool(
+                tool_name,
+                arguments,
+            )
+
+            # 2. Check whether MCP reported an error
+            if result.isError:
+                raise RuntimeError("MCP tool reported an error")
+
+            # 3. Extract text from the MCP response
+            texts = [
+                item.text
+                for item in result.content
+                if item.type == "text"
+            ]
+
+            tool_result = "\n".join(texts)
+
+            # 4. Send the extracted result back to the container
+            return {
+                "type": "tool_result",
+                "id": request_id,
+                "success": True,
+                "result": tool_result,
+            }
+
+        except Exception as exc:
+            return {
+                "type": "tool_result",
+                "id": request_id,
+                "success": False,
+                "error": str(exc),
+            }
+
+
+
+    async def _process_ipc(
+        self,
+        container,
+        connection,
+        deadline,
+        allowed_tools,
+    ):
+        sock = connection._sock
+        frame_buffer = bytearray()
+        stdout_buffer = bytearray()
+
+        while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Sandbox execution timed out")
+
+            readable, _, _ = await asyncio.to_thread(
+                select.select, [sock], [], [], 0.1
+            )
+
+            if readable:
+                data = await asyncio.to_thread(sock.recv, 65536)
+
+                if not data:
+                    # Socket closed: retrieve the container exit status.
+                    await asyncio.to_thread(container.reload)
+                    state = container.attrs["State"]
+
+                    if state["Running"]:
+                        raise RuntimeError(
+                            "IPC socket closed while container is running"
+                        )
+
+                    if frame_buffer or stdout_buffer:
+                        raise RuntimeError(
+                            "IPC socket closed with incomplete message"
+                        )
+
+                    return {"StatusCode": state["ExitCode"]}
+
+                frame_buffer.extend(data)
+
+                for stream_id, payload in _extract_frames(frame_buffer):
+                    if stream_id != 1:
+                        continue
+
+                    stdout_buffer.extend(payload)
+
+                    while b"\n" in stdout_buffer:
+                        line, _, remaining = stdout_buffer.partition(b"\n")
+                        stdout_buffer = bytearray(remaining)
+
+                        if not line:
+                            continue
+
+                        request = json.loads(line.decode("utf-8"))
+
+                        if request.get("type") != "tool_call":
+                            raise RuntimeError("Unexpected IPC message")
+
+                        if request.get("name") not in allowed_tools:
+                            raise RuntimeError("Unauthorized MCP tool")
+
+                        remaining_time = deadline - time.monotonic()
+
+                        if remaining_time <= 0:
+                            raise TimeoutError(
+                                "Sandbox execution timed out"
+                            )
+
+                        response = await asyncio.wait_for(
+                            self._dispatch_tool_request(request),
+                            timeout=remaining_time,
+                        )
+
+                        message = (
+                            json.dumps(response) + "\n"
+                        ).encode("utf-8")
+
+                        await asyncio.to_thread(
+                            sock.sendall,
+                            message,
+                        )
+
+            # Refresh container state.
+            await asyncio.to_thread(container.reload)
+            container_state = container.attrs["State"]
+
+            # Do not return immediately after the container exits.
+            # Continue reading until the socket reaches EOF.
+            if not container_state["Running"]:
+                continue
+
+
+    async def run(
+        self,
+        code: str,
+        discovered_tool_names: list[str] | None = None,
+    ) -> ExecutionResult:
         """Execute code in an isolated container and return the result."""
 
         container = None
@@ -260,6 +441,7 @@ class DockerRunner:
             connection = container.attach_socket(
                 params={
                     "stdin": 1,
+                    "stdout": 1,
                     "stream": 1,
                 }
             )
@@ -268,8 +450,11 @@ class DockerRunner:
             container.start()
             print("[DEBUG] Container started", flush=True)
 
-            # 5. Send code as one JSON line
-            message = json.dumps({"code": code}) + "\n"
+            # 5. Send code as one JSON line and MCP tools
+            message = json.dumps({
+                "code": code,
+                "tools": discovered_tool_names or [],
+            }) + "\n"
 
             connection._sock.sendall(
                 message.encode("utf-8")
@@ -280,21 +465,28 @@ class DockerRunner:
             # No shutdown(1) needed.
             # The container reads until newline.
 
-            # 6. Wait for execution
+            # 6. Enforce the execution deadline.
+            # try:
+            #     print("[DEBUG] Waiting for container to exit...", flush=True)
+            #     result = self._wait_for_execution(container)
+            #     print("[DEBUG] Exit status:", result, flush=True)
+            # except TimeoutError:
+            #     return self._handle_execution_timeout(container)
             try:
-                print("[DEBUG] Waiting for container to exit...", flush=True)
-                result = container.wait(
-                    timeout=self.config.max_execution_time_seconds
+                deadline = (
+                    time.monotonic()
+                    + self.config.max_execution_time_seconds
                 )
-                print("[DEBUG] Exit status:", result, flush=True)
 
-            except (
-                requests.exceptions.ReadTimeout,
-                requests.exceptions.ConnectionError,
-            ) as exc:
-                return self._handle_execution_timeout(
-                    container, exc
+                result = await self._process_ipc(
+                    container,
+                    connection,
+                    deadline,
+                    set(discovered_tool_names or []),
                 )
+
+            except TimeoutError:
+                return self._handle_execution_timeout(container)
 
             # 7. Check memory restriction
             memory_error = self._handle_memory_limit(container)
@@ -320,21 +512,38 @@ class DockerRunner:
                     ),
                 )
 
-            # 10. Read final_answer() result
+            # 10. Read the generated code's result from result.json.
             try:
                 final_result = self._read_final_answer(container)
-            except (docker.errors.NotFound, FileNotFoundError, KeyError, tarfile.TarError) as exc:
-                print("[DEBUG] Final-answer metadata unavailable:", repr(exc), flush=True)
-                final_result = {"called": False, "value": None}
+            except (docker.errors.DockerException, FileNotFoundError,
+                    KeyError, tarfile.TarError, OSError, ValueError) as exc:
+                return ExecutionResult(
+                    stdout=stdout,
+                    stderr=stderr,
+                    truncated=truncated,
+                    error=f"Failed to read sandbox result.json: {exc}",
+                )
 
-            # 11. Return execution result
+            # 11. Apply the output byte limit to captured code output too.
+            output_stdout = final_result.get("stdout", "")
+            output_stderr = final_result.get("stderr", "")
+            max_bytes = self.config.max_output_bytes
+            stdout_bytes = output_stdout.encode("utf-8")
+            stderr_bytes = output_stderr.encode("utf-8")
+            if len(stdout_bytes) + len(stderr_bytes) > max_bytes:
+                truncated = True
+                stdout_bytes = stdout_bytes[:max_bytes // 2]
+                stderr_bytes = stderr_bytes[:max_bytes - max_bytes // 2]
+                output_stdout = stdout_bytes.decode("utf-8", errors="replace")
+                output_stderr = stderr_bytes.decode("utf-8", errors="replace")
+
             return ExecutionResult(
-                stdout=stdout,
-                stderr=stderr,
+                stdout=output_stdout,
+                stderr=output_stderr,
                 truncated=truncated,
-                error=None,
-                is_final_answer=final_result["called"],
-                final_answer_value=final_result["value"],
+                error=final_result.get("error"),
+                is_final_answer=final_result.get("called", False),
+                final_answer_value=final_result.get("value"),
             )
 
         except ImportError as exc:
