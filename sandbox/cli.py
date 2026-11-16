@@ -9,6 +9,7 @@ from schemas.sandbox import SandboxConfig
 from sandbox.mcp_manager import MCPManager
 from sandbox.sandbox import Sandbox
 from aioconsole import ainput
+import traceback
 
 
 def parse_args() -> argparse.Namespace:
@@ -145,22 +146,16 @@ async def interactive_loop(
 
         try:
             # Docker SDK operations are blocking.
-            result = await asyncio.to_thread(
-                sandbox.execute,
-                code,
-            )
-
-        except asyncio.CancelledError:
-            print("\nExecution interrupted.")
-            raise
+            result = await sandbox.execute(code)
 
         except KeyboardInterrupt:
             print("\nInterrupted.")
             break
 
-        except Exception as exc:
-            print(f"Execution error: {exc}")
-            continue
+        # except Exception as exc:
+        #     print(f"Execution error: {exc}")
+        #     traceback.print_exc()
+        #     continue
 
         if result.stdout:
             print(result.stdout, end="")
@@ -226,9 +221,9 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nInterrupted.")
 
-    except Exception as exc:
-        print(f"Sandbox error: {exc}")
-        raise SystemExit(1) from exc
+    # except Exception as exc:
+    #     print(f"Sandbox error: {exc}")
+    #     raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

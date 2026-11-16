@@ -1,6 +1,10 @@
+
+from contextlib import AsyncExitStack
 from typing import Any
 
-from mcp import Client, StdioServerParameters
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, Tool
 
 
@@ -8,7 +12,8 @@ class MCPClient:
     """Manage one MCP server connection."""
 
     def __init__(self) -> None:
-        self._client: Client | None = None
+        self._session: ClientSession | None = None
+        self._stack: AsyncExitStack | None = None
         self._connected = False
 
     async def connect_stdio(
@@ -24,42 +29,55 @@ class MCPClient:
             env=env,
         )
 
-        await self._connect(params)
+        await self._connect(stdio_client(params))
 
     async def connect_http(self, url: str) -> None:
-        """Connect to an MCP server via Streamable HTTP."""
-        await self._connect(url)
+        """Connect via Streamable HTTP."""
+        await self._connect(streamable_http_client(url))
 
-    async def _connect(self, server: Any) -> None:
+    async def _connect(self, transport: Any) -> None:
         if self._connected:
             raise RuntimeError("Already connected to an MCP server")
 
-        client = Client(server)
+        stack = AsyncExitStack()
 
-        # Enter the SDK-managed connection.
-        await client.__aenter__()
+        try:
+            streams = await stack.enter_async_context(transport)
 
-        self._client = client
+            read, write = streams[0], streams[1]
+
+            session = await stack.enter_async_context(
+                ClientSession(read, write)
+            )
+
+            await session.initialize()
+
+        except BaseException:
+            await stack.aclose()
+            raise
+
+        self._stack = stack
+        self._session = session
         self._connected = True
 
-    def _require_client(self) -> Client:
-        if not self._connected or self._client is None:
+    def _require_client(self) -> ClientSession:
+        if not self._connected or self._session is None:
             raise RuntimeError("MCP client is not connected")
 
-        return self._client
+        return self._session
 
     async def list_tools(self) -> list[Tool]:
         """Discover tools exposed by the MCP server."""
-        client = self._require_client()
+        session = self._require_client()
 
-        tools = []
+        tools: list[Tool] = []
         cursor = None
 
         while True:
-            result = await client.list_tools(cursor=cursor)
+            result = await session.list_tools(cursor=cursor)
             tools.extend(result.tools)
 
-            cursor = result.next_cursor
+            cursor = result.nextCursor
             if cursor is None:
                 break
 
@@ -70,25 +88,26 @@ class MCPClient:
         name: str,
         arguments: dict[str, Any] | None = None,
     ) -> CallToolResult:
-        """Call a tool by name."""
-        client = self._require_client()
+        """Call an MCP tool."""
+        session = self._require_client()
 
-        return await client.call_tool(
+        return await session.call_tool(
             name,
-            arguments or {},
+            arguments=arguments or {},
         )
 
     async def close(self) -> None:
         """Close the MCP connection."""
-        if self._client is None:
+        stack = self._stack
+
+        if stack is None:
             return
 
-        client = self._client
-
         try:
-            await client.__aexit__(None, None, None)
+            await stack.aclose()
         finally:
-            self._client = None
+            self._stack = None
+            self._session = None
             self._connected = False
 
     @property
