@@ -1,10 +1,10 @@
 {
-  "task_id": 1,
-  "task_definition": "Multi-step arithmetic problem: On your FIRST turn, inspect the sandbox tools by running `print(add(25, 75))` and `print(diff(100, 40))` to verify their behavior. Do NOT call final_answer in the first turn. On the NEXT turn, after checking the printed observation, define the function `solve(n)` that uses add and diff to compute (n + 75) - 40, verify it with the test assertions, and submit the standalone solution code using final_answer(solution_code).",
-  "function_definition": "def solve(n):",
+  "task_id": 301,
+  "task_definition": "Write a function to find the depth of a dictionary.",
+  "function_definition": "def dict_depth(d):",
   "test_imports": [],
   "test_list": [
-    "assert solve(10) == 45",
-    "assert solve(25) == 60"
+    "assert dict_depth({'a':1, 'b': {'c':'python'}})==2",
+    "assert dict_depth({1: 'Sun', 2: {3: {4:'Mon'}}})==3"
   ]
 }
