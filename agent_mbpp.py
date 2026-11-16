@@ -1,4 +1,5 @@
 import argparse
+import os
 from pathlib import Path
 
 from agent.config import AgentConfig
@@ -20,11 +21,15 @@ class MBPPCLI:
         )
         self.parser.add_argument(
             "--model-name", type=str,
-            required=True, help="Name of the model to use",
+            required=False,
+            default=os.getenv("MODEL_NAME"),
+            help="Name of the model to use",
         )
         self.parser.add_argument(
             "--provider-url", type=str,
-            required=True, help="Base URL of the provider",
+            required=False,
+            default=os.getenv("PROVIDER_URL"),
+            help="Base URL of the provider",
         )
         self.parser.add_argument(
             "--env-file", type=str,
