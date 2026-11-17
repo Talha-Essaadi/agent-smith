@@ -1,6 +1,8 @@
 import argparse
 import asyncio
 from pathlib import Path
+import shlex
+import sys
 
 from agent import AgentConfig, resolve_llm_settings
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
@@ -37,6 +39,14 @@ class SWEBenchCLI:
             "--max-iterations", type=int, required=False,
             default=None, help="Maximum number of iterations"
         )
+        self.parser.add_argument(
+            "--mcp-stdio", type=str, required=False, default=None,
+            help="Command used to launch a local MCP server",
+        )
+        self.parser.add_argument(
+            "--mcp-server", type=str, required=False, default=None,
+            help="URL of a Streamable HTTP MCP server",
+        )
         self.args = self.parser.parse_args()
 
     def _load_task(self) -> SWEBenchTaskInput:
@@ -49,6 +59,7 @@ class SWEBenchCLI:
     async def run(self) -> None:
         task = None
         sandbox = None
+        mcp_manager = None
         solution_output: SolutionOutput | None = None
         try:
             model_name, provider_url = resolve_llm_settings(
@@ -63,9 +74,30 @@ class SWEBenchCLI:
             # Get limits
             limits = AgentConfig().get_limits("swebench",
                                               self.args.max_iterations)
-            # Initialize sandbox
+            # Initialize sandbox and MCP manager
             sandbox_config = SandboxConfig()
             mcp_manager = MCPManager()
+
+            if self.args.mcp_stdio:
+                parts = shlex.split(self.args.mcp_stdio)
+                await mcp_manager.connect_stdio(
+                    server_name="swebench",
+                    command=parts[0],
+                    args=parts[1:],
+                )
+            elif self.args.mcp_server:
+                await mcp_manager.connect_http(
+                    server_name="swebench",
+                    url=self.args.mcp_server,
+                )
+            else:
+                mcp_script = Path(__file__).resolve().parent / "mcp_tools_swebench.py"
+                await mcp_manager.connect_stdio(
+                    server_name="swebench",
+                    command=sys.executable,
+                    args=[str(mcp_script)],
+                )
+
             sandbox = Sandbox(sandbox_config, mcp_manager)
             # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
@@ -101,8 +133,16 @@ class SWEBenchCLI:
                     output_path.parent.mkdir(parents=True, exist_ok=True)
                     output_path.write_text(solution_output.model_dump_json(indent=2))
             finally:
+                if mcp_manager is not None:
+                    try:
+                        await mcp_manager.close()
+                    except Exception:
+                        pass
                 if sandbox is not None:
-                    sandbox.close()
+                    try:
+                        sandbox.close()
+                    except Exception:
+                        pass
 
 
 def main():

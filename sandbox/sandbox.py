@@ -1,3 +1,5 @@
+import json
+
 from schemas import BaseSandbox, SandboxConfig, ExecutionResult
 from sandbox.mcp_manager import MCPManager
 from sandbox.runner import DockerRunner
