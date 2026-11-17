@@ -96,7 +96,7 @@ class BaseSandbox(ABC):
      and our MockSandbox must implement."""
 
     @abstractmethod
-    def execute(self, code: str) -> ExecutionResult:
+    async def execute(self, code: str) -> ExecutionResult:
         """Executes Python code in the sandbox namespace
          and returns structured output."""
         pass

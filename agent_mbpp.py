@@ -1,8 +1,8 @@
 import argparse
-import os
+import asyncio
 from pathlib import Path
 
-from agent.config import AgentConfig
+from agent import AgentConfig, resolve_llm_settings
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
 from sandbox import Sandbox, MCPManager
 from schemas import MBPPTaskInput, SolutionOutput, SandboxConfig
@@ -22,18 +22,16 @@ class MBPPCLI:
         self.parser.add_argument(
             "--model-name", type=str,
             required=False,
-            default=os.getenv("MODEL_NAME"),
-            help="Name of the model to use",
+            help="Name of the model to use (defaults to MODEL_NAME)",
         )
         self.parser.add_argument(
             "--provider-url", type=str,
             required=False,
-            default=os.getenv("PROVIDER_URL"),
-            help="Base URL of the provider",
+            help="Base URL of the provider (defaults to PROVIDER_URL)",
         )
         self.parser.add_argument(
             "--env-file", type=str,
-            required=False, help="Path to the .env file"
+            required=False, help="Path to the provider API keys file"
         )
         self.parser.add_argument(
             "--max-iterations", type=int, required=False,
@@ -48,12 +46,20 @@ class MBPPCLI:
         task = MBPPTaskInput.model_validate_json(task)
         return task
 
-    def run(self):
+    async def run(self) -> None:
         task = None
         sandbox = None
+        solution_output: SolutionOutput | None = None
         try:
+            model_name, provider_url = resolve_llm_settings(
+                self.args.model_name, self.args.provider_url,
+            )
             # Load task
             task = self._load_task()
+            # Initialize LLM client
+            llm_client = LLMClient(model_name=model_name,
+                                   provider_url=provider_url,
+                                   env_file=self.args.env_file)
             # Get limits
             limits = AgentConfig().get_limits("mbpp", self.args.max_iterations)
             # Initialize sandbox
@@ -64,16 +70,14 @@ class MBPPCLI:
             system_prompt = PromptBuilder.build_mbpp_system_prompt(
                 sandbox.get_manual("mbpp"))
             user_prompt = PromptBuilder.build_mbpp_user_prompt(task)
-            # Initialize llm client
-            llm_client = LLMClient(model_name=self.args.model_name,
-                                   provider_url=self.args.provider_url,
-                                   env_file=self.args.env_file)
             # Initialize orchestrator
             orchestrator = AgentOrchestrator(llm_client, sandbox, limits)
-            solution_output = orchestrator.run(task_id=str(task.task_id),
-                                               benchmark="mbpp",
-                                               system_prompt=system_prompt,
-                                               user_prompt=user_prompt)
+            solution_output = await orchestrator.run(
+                task_id=str(task.task_id),
+                benchmark="mbpp",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
         except Exception as e:
             # Build a minimal failure output so we always produce valid JSON
             task_id = str(task.task_id) if task else "unknown"
@@ -90,17 +94,19 @@ class MBPPCLI:
                 error=str(e),
             )
         finally:
-            # Always write output
-            Path(self.args.output).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.args.output, "w") as f:
-                f.write(solution_output.model_dump_json(indent=2))
-            if sandbox is not None:
-                sandbox.close()
+            try:
+                if solution_output is not None:
+                    output_path = Path(self.args.output)
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(solution_output.model_dump_json(indent=2))
+            finally:
+                if sandbox is not None:
+                    sandbox.close()
 
 
 def main():
     cli = MBPPCLI()
-    cli.run()
+    asyncio.run(cli.run())
 
 
 if __name__ == "__main__":

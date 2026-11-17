@@ -1,4 +1,21 @@
+import os
+
 from pydantic import BaseModel
+
+
+def resolve_llm_settings(model_name: str | None,
+                         provider_url: str | None) -> tuple[str, str]:
+    model = model_name if model_name is not None else os.getenv("MODEL_NAME", "")
+    url = provider_url if provider_url is not None else os.getenv("PROVIDER_URL", "")
+    model, url = model.strip(), url.strip()
+    missing = []
+    if not model:
+        missing.append("--model-name (or MODEL_NAME)")
+    if not url:
+        missing.append("--provider-url (or PROVIDER_URL)")
+    if missing:
+        raise ValueError("Missing LLM configuration. Set " + " and ".join(missing) + ".")
+    return model, url
 
 
 class AgentLimits(BaseModel):
