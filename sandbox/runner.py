@@ -295,7 +295,12 @@ class DockerRunner:
 
             # 2. Check whether MCP reported an error
             if result.isError:
-                raise RuntimeError("MCP tool reported an error")
+                error_text = "\n".join(
+                    item.text
+                    for item in result.content
+                    if item.type == "text"
+                )
+                raise RuntimeError(error_text or "MCP tool reported an error")
 
             # 3. Extract text from the MCP response
             texts = [

@@ -1,5 +1,5 @@
 
-from mcp.server import MCPServer
+from mcp.server.fastmcp import FastMCP
 
 from swebench_tools import (
     read_file,
@@ -15,7 +15,7 @@ from swebench_tools import (
 
 
 # Create the MCP server
-mcp = MCPServer("AgentSmith-SWEbench")
+mcp = FastMCP("AgentSmith-SWEbench")
 
 
 # -----------------------------
@@ -45,8 +45,8 @@ mcp.tool()(get_patch)
 mcp.tool()(run_command)
 
 
-# if __name__ == "__main__":
-#     mcp.run(transport="stdio")
-
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    mcp.run(transport="stdio")
+
+# if __name__ == "__main__":
+#     mcp.run(transport="streamable-http")
