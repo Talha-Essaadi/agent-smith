@@ -1,8 +1,10 @@
-import os
 import argparse
+import asyncio
 from pathlib import Path
+import shlex
+import sys
 
-from agent.config import AgentConfig
+from agent import AgentConfig, resolve_llm_settings
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
 from sandbox import Sandbox, MCPManager
 from schemas import SWEBenchTaskInput, SolutionOutput, SandboxConfig
@@ -22,22 +24,28 @@ class SWEBenchCLI:
         self.parser.add_argument(
             "--model-name", type=str,
             required=False,
-            default=os.getenv("MODEL_NAME"),
-            help="Name of the model to use",
+            help="Name of the model to use (defaults to MODEL_NAME)",
         )
         self.parser.add_argument(
             "--provider-url", type=str,
             required=False,
-            default=os.getenv("PROVIDER_URL"),
-            help="Base URL of the provider",
+            help="Base URL of the provider (defaults to PROVIDER_URL)",
         )
         self.parser.add_argument(
             "--env-file", type=str,
-            required=False, help="Path to the .env file"
+            required=False, help="Path to the provider API keys file"
         )
         self.parser.add_argument(
             "--max-iterations", type=int, required=False,
             default=None, help="Maximum number of iterations"
+        )
+        self.parser.add_argument(
+            "--mcp-stdio", type=str, required=False, default=None,
+            help="Command used to launch a local MCP server",
+        )
+        self.parser.add_argument(
+            "--mcp-server", type=str, required=False, default=None,
+            help="URL of a Streamable HTTP MCP server",
         )
         self.args = self.parser.parse_args()
 
@@ -48,33 +56,61 @@ class SWEBenchCLI:
         task = SWEBenchTaskInput.model_validate_json(task)
         return task
 
-    def run(self):
+    async def run(self) -> None:
         task = None
         sandbox = None
+        mcp_manager = None
+        solution_output: SolutionOutput | None = None
         try:
+            model_name, provider_url = resolve_llm_settings(
+                self.args.model_name, self.args.provider_url,
+            )
             # Load task
             task = self._load_task()
+            # Initialize LLM client
+            llm_client = LLMClient(model_name=model_name,
+                                   provider_url=provider_url,
+                                   env_file=self.args.env_file)
             # Get limits
             limits = AgentConfig().get_limits("swebench",
                                               self.args.max_iterations)
-            # Initialize sandbox
+            # Initialize sandbox and MCP manager
             sandbox_config = SandboxConfig()
             mcp_manager = MCPManager()
+
+            if self.args.mcp_stdio:
+                parts = shlex.split(self.args.mcp_stdio)
+                await mcp_manager.connect_stdio(
+                    server_name="swebench",
+                    command=parts[0],
+                    args=parts[1:],
+                )
+            elif self.args.mcp_server:
+                await mcp_manager.connect_http(
+                    server_name="swebench",
+                    url=self.args.mcp_server,
+                )
+            else:
+                mcp_script = Path(__file__).resolve().parent / "mcp_tools_swebench.py"
+                await mcp_manager.connect_stdio(
+                    server_name="swebench",
+                    command=sys.executable,
+                    args=[str(mcp_script)],
+                )
+
             sandbox = Sandbox(sandbox_config, mcp_manager)
             # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
                 sandbox.get_manual("swebench"))
             user_prompt = PromptBuilder.build_swebench_user_prompt(task)
-            # Initialize llm client
-            llm_client = LLMClient(model_name=self.args.model_name,
-                                   provider_url=self.args.provider_url,
-                                   env_file=self.args.env_file)
             # Initialize orchestrator
             orchestrator = AgentOrchestrator(llm_client, sandbox, limits)
-            solution_output = orchestrator.run(task_id=str(task.instance_id),
-                                               benchmark="swebench",
-                                               system_prompt=system_prompt,
-                                               user_prompt=user_prompt)
+            solution_output = await orchestrator.run(
+                task_id=str(task.instance_id),
+                benchmark="swebench",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
         except Exception as e:
             # Build a minimal failure output so we always produce valid JSON
             task_id = str(task.instance_id) if task else "unknown"
@@ -91,17 +127,27 @@ class SWEBenchCLI:
                 error=str(e),
             )
         finally:
-            # Always write output
-            Path(self.args.output).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.args.output, "w") as f:
-                f.write(solution_output.model_dump_json(indent=2))
-            if sandbox is not None:
-                sandbox.close()
+            try:
+                if solution_output is not None:
+                    output_path = Path(self.args.output)
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(solution_output.model_dump_json(indent=2))
+            finally:
+                if mcp_manager is not None:
+                    try:
+                        await mcp_manager.close()
+                    except Exception:
+                        pass
+                if sandbox is not None:
+                    try:
+                        sandbox.close()
+                    except Exception:
+                        pass
 
 
 def main():
     cli = SWEBenchCLI()
-    cli.run()
+    asyncio.run(cli.run())
 
 
 if __name__ == "__main__":

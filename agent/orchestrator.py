@@ -27,8 +27,8 @@ class AgentOrchestrator:
                     "Use small slices.")
         return text
 
-    def run(self, task_id: str, benchmark: str,
-            system_prompt: str, user_prompt: str) -> SolutionOutput:
+    async def run(self, task_id: str, benchmark: str,
+                  system_prompt: str, user_prompt: str) -> SolutionOutput:
 
         st = time.perf_counter()
         steps: List[StepMetrics] = []
@@ -80,7 +80,7 @@ class AgentOrchestrator:
             else:
                 sandbox_input = ext.code
                 last_valid_code = ext.code
-                exec_res = self.sandbox.execute(sandbox_input)
+                exec_res = await self.sandbox.execute(sandbox_input)
                 obs = exec_res.to_observation_string()
                 if ext.warning:
                     obs = f"{ext.warning}\n\n{obs}"
@@ -116,7 +116,7 @@ class AgentOrchestrator:
             if benchmark == "mbpp" and last_valid_code:
                 code_solution = last_valid_code
             if benchmark == "swebench":
-                patch_res = self.sandbox.execute("print(get_patch())")
+                patch_res = await self.sandbox.execute("print(get_patch())")
                 if patch_res.stdout.strip():
                     code_solution = patch_res.stdout.strip()
 

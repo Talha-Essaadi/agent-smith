@@ -15,7 +15,7 @@ from swebench_tools import (
 
 
 # Create the MCP server
-mcp = FastMCP("AgentSmith-SWEbench")
+mcp = FastMCP("swebench")
 
 
 # -----------------------------
@@ -47,6 +47,3 @@ mcp.tool()(run_command)
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
-
-# if __name__ == "__main__":
-#     mcp.run(transport="streamable-http")
