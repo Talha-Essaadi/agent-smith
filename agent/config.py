@@ -49,14 +49,12 @@ class AgentConfig(BaseModel):
                    max_iterations_override: int | None = None) -> AgentLimits:
         if benchmark.strip().lower() == "mbpp":
             if max_iterations_override is not None:
-                MBPP_LIMITS.model_copy(
+                return MBPP_LIMITS.model_copy(
                     update={"max_iterations": max_iterations_override})
-            return MBPP_LIMITS
         elif benchmark.strip().lower() == "swebench":
             if max_iterations_override is not None:
-                SWE_LIMITS.model_copy(
+                return SWE_LIMITS.model_copy(
                     update={"max_iterations": max_iterations_override})
-            return SWE_LIMITS
         else:
             raise ValueError(
                 f"Unknown eval_type: {benchmark}, use 'MBPP' or 'SWEBENCH'"
