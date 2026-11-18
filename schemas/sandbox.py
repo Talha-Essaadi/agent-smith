@@ -61,7 +61,7 @@ class ExecutionResult(BaseModel):
     timed_out: bool = False
     truncated: bool = False
     is_final_answer: bool = False
-    resource_limit_exceeded: bool = True
+    resource_limit_exceeded: bool = False
     final_answer_value: Optional[str] = None
 
     def to_observation_string(self) -> str:
@@ -86,8 +86,10 @@ class ExecutionResult(BaseModel):
                 "Use more specific queries or smaller line ranges.]"
             )
         if not parts and not self.is_final_answer:
-            return "[Execution completed successfully with no output. "
-            "Remember to use print() to inspect variables or tool results.]"
+            return (
+                "[Execution completed successfully with no output. "
+                "Remember to use print() to inspect variables or tool results.]"
+            )
         return "\n\n".join(parts)
 
 
