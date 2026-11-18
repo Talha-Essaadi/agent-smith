@@ -3,6 +3,7 @@ import asyncio
 from pathlib import Path
 import shlex
 import sys
+from dotenv import load_dotenv
 
 from agent import AgentConfig, resolve_llm_settings
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
@@ -62,6 +63,7 @@ class MBPPCLI:
         manager = None
         solution_output: SolutionOutput | None = None
         try:
+            load_dotenv(self.args.env_file, override=True)
             model_name, provider_url = resolve_llm_settings(
                 self.args.model_name, self.args.provider_url,
             )
