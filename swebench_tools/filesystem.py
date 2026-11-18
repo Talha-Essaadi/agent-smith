@@ -1,6 +1,13 @@
-
 from pathlib import Path
 import fnmatch
+import os
+# from sandbox.docker_backend import run_in_container
+
+
+def pwd() -> str:
+    """Return the working directory inside the SWE-bench container."""
+    # return run_in_container(["pwd"])
+    return os.getcwd()
 
 
 # All filesystem operations are restricted to the SWE-bench repository.
@@ -36,6 +43,7 @@ def read_file(filepath: str, start_line: int, end_line: int) -> str:
     Line numbers are 1-based and inclusive.
     Output includes line numbers, similar to `cat -n`.
     """
+    print(f"*********************{pwd()}")
     if start_line < 1:
         raise ValueError("start_line must be >= 1")
 
@@ -58,7 +66,6 @@ def read_file(filepath: str, start_line: int, end_line: int) -> str:
     for line_number in range(start_line, end_line + 1):
         content = lines[line_number - 1]
         result.append(f"{line_number:6}\t{content}")
-
     return "\n".join(result)
 
 
@@ -106,7 +113,9 @@ def list_files(directory: str, pattern: str = "*") -> str:
         list_files("src", "*.c")
         list_files("agent", "**/*.py")
     """
-    path = _resolve_path(directory)
+    # path = _resolve_path(directory)
+    path = Path(directory)
+    print("****", path)
 
     if not path.exists():
         raise FileNotFoundError(f"Directory not found: {directory}")
@@ -130,7 +139,14 @@ def list_files(directory: str, pattern: str = "*") -> str:
         if item.is_file() and fnmatch.fnmatch(item.relative_to(path).as_posix(), pattern):
             results.append(str(item.relative_to(TESTBED_ROOT)))
 
+
+
     if not results:
         return f"No files matching '{pattern}' found in '{directory}'."
 
     return "\n".join(sorted(results))
+
+
+
+
+

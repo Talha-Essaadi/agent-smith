@@ -1,15 +1,17 @@
 
 import argparse
+import sys
+import httpx
 import asyncio
 import json
 import shlex
 from pathlib import Path
-
 from schemas.sandbox import SandboxConfig
 from sandbox.mcp_manager import MCPManager
 from sandbox.sandbox import Sandbox
 from aioconsole import ainput
 import traceback
+from .exceptions import MCPConnectionError
 
 
 def parse_args() -> argparse.Namespace:
@@ -158,7 +160,15 @@ async def interactive_loop(
         #     continue
 
         if result.stdout:
-            print(result.stdout, end="")
+            try:
+                # sys.stdout.write(result.stdout[:10000])
+                sys.stdout.write(result.stdout)
+                sys.stdout.flush()
+
+                # if len(result.stdout) > 10000:
+                #     print("\n[Output truncated]")
+            except BlockingIOError:
+                print("\n[Terminal output blocked]", file=sys.stderr)
 
         if result.stderr:
             print(result.stderr, end="")
@@ -212,18 +222,48 @@ async def async_main() -> None:
         await manager.close()
 
 
-def main() -> None:
-    """Synchronous entry point for pyproject.toml."""
+# def main():
+#     try:
+#         asyncio.run(async_main())
 
+
+#     except KeyboardInterrupt:
+#         print("\nInterrupted.")
+#     except Exception as exc:
+#         if _is_connection_error(exc):
+#             print(
+#                 "\n[ERROR] Failed to connect to MCP server.\n"
+#                 "The server may be stopped or unreachable.\n"
+#                 "Check the URL, port, and server status.",
+#                 file=sys.stderr,
+#             )
+#             raise SystemExit(1) from None
+
+#         raise
+
+
+
+def main():
     try:
         asyncio.run(async_main())
 
     except KeyboardInterrupt:
         print("\nInterrupted.")
+    except MCPConnectionError as exc:
+        print(
+                "\n[ERROR] Failed to connect to MCP server.\n"
+                "The server may be stopped or unreachable.\n"
+                "Check the URL, port, and server status.\n\n"
+                "Make sure the MCP server is running and the URL is correct.\n\n"
+                "Example:\n"
+                "uv run python mcp_tools_mbpp.py --transport streamable-http, or\n"
+                "uv run python mcp_tools_swebench.py --transport streamable-http",
+                file=sys.stderr,
+            )
+        raise SystemExit(1) from None
 
-    # except Exception as exc:
-    #     print(f"Sandbox error: {exc}")
-    #     raise SystemExit(1) from exc
+    except Exception as exc:
+        print(f"Execution error: {exc}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 
 from mcp.server.fastmcp import FastMCP
-
 from swebench_tools import (
     read_file,
     edit_file,
@@ -11,7 +10,10 @@ from swebench_tools import (
     run_tests,
     get_patch,
     run_command,
+    pwd,
 )
+import argparse
+
 
 
 # Create the MCP server
@@ -22,6 +24,7 @@ mcp = FastMCP("swebench")
 # Filesystem tools
 # -----------------------------
 
+mcp.tool()(pwd)
 mcp.tool()(read_file)
 mcp.tool()(edit_file)
 mcp.tool()(list_files)
@@ -45,5 +48,21 @@ mcp.tool()(get_patch)
 mcp.tool()(run_command)
 
 
+
+
+
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    try:
+        parser = argparse.ArgumentParser()
+
+        parser.add_argument(
+            "--transport",
+            choices=["stdio", "streamable-http"],
+            default="stdio",
+        )
+
+        args = parser.parse_args()
+
+        mcp.run(transport=args.transport)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")

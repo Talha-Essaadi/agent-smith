@@ -31,3 +31,7 @@ class SandboxImportError(SandboxError):
 
 class SandboxCleanupError(SandboxError):
     """Raised when sandbox resources cannot be cleaned up properly."""
+
+
+class MCPConnectionError(Exception):
+    """Raised when an MCP server connection fails."""

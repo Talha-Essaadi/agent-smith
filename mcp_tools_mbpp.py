@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+import argparse
 
 from mcp.server.fastmcp import FastMCP
 
@@ -56,5 +57,19 @@ def run_tests(code: str, test_list: list[str]) -> str:
         })
 
 
+
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    try:
+        parser = argparse.ArgumentParser()
+
+        parser.add_argument(
+            "--transport",
+            choices=["stdio", "streamable-http"],
+            default="stdio",
+        )
+
+        args = parser.parse_args()
+
+        mcp.run(transport=args.transport)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")

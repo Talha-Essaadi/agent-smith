@@ -3,6 +3,7 @@ from .filesystem import (
     read_file,
     edit_file,
     list_files,
+    pwd,
 )
 
 from .code_search import (
@@ -22,6 +23,7 @@ __all__ = [
     "read_file",
     "edit_file",
     "list_files",
+    "pwd",
 
     # Code search tools
     "search_code",
