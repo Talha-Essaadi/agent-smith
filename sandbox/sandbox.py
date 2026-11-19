@@ -15,14 +15,10 @@ class Sandbox(BaseSandbox):
     async def execute(self, code: str) -> ExecutionResult:
         tools = self.mcp_manager.list_tools()
 
-        discovered_tool_names = [
-            tool.name
-            for tool in tools
-        ]
-        print(f"[DEBUG] Discovered tools: {discovered_tool_names}")
+
         return await self._runner.run(
             code,
-            discovered_tool_names,
+            tools,
         )
 
     def get_manual(self, type: str) -> str:

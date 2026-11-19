@@ -27,14 +27,14 @@ try:
     message = json.loads(protocol_in.readline())
 
     generated_code = message["code"]
-    tool_names = message.get("tools", [])
+    tools = message.get("tools", [])
 
     # Create container-side IPC bridge
     bridge = IPCBridge(protocol_in, protocol_out)
 
     # Dynamically inject discovered MCP tools
     namespace = create_tool_namespace(
-        tool_names=tool_names,
+        tools=tools,
         call_tool=bridge.call_tool,
     )
 

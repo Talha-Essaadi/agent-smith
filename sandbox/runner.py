@@ -14,6 +14,8 @@ import asyncio
 import json
 import select
 import time
+import os
+from docker.errors import ImageNotFound
 
 
 def _extract_frames(buffer: bytearray):
@@ -36,11 +38,13 @@ def _extract_frames(buffer: bytearray):
 
 
 class DockerRunner:
-    def __init__(self, config: SandboxConfig, mcp_manager=None) -> None:
+    def __init__(self, config: SandboxConfig, mcp_manager=None, task=None) -> None:
         """Store configuration and initialize the Docker client."""
         self.config = config
         self.client = docker.from_env()
-        self.image = "agent-sandbox:latest"  # DEBUG: verify /testbed/main.py exists in mounted volume
+        self.image = "agent-sandbox:latest"
+        if task:
+            self.image = task.docker_image
         self.testbed_volume = self.client.volumes.create(
             name=f"agent-testbed"
         )
@@ -51,12 +55,27 @@ class DockerRunner:
         self.import_guard = ImportGuard(
             config.authorized_imports
         )
-        self._ensure_image()
+        self._ensure_image(task)
         self._initialize_volumes()
         self.mcp_manager = mcp_manager
 
-    def _ensure_image(self) -> None:
-        """Build the Docker image from the local Dockerfile if missing."""
+    def _ensure_image(
+        self,
+        task_image: str | None = None,
+    ) -> None:
+        """Ensure the correct sandbox image exists."""
+
+        base_image = "python:3.10-slim"
+        self.image = "agent-sandbox:mbpp"
+
+        if task:
+            if not task.docker_image:
+                raise ValueError(
+                    "SWE-bench requires a task Docker image"
+                )
+
+            base_image = task.docker_image
+            self.image = f"agent-sandbox:swe-{task.docker_image}"
 
         try:
             self.client.images.get(self.image)
@@ -64,22 +83,23 @@ class DockerRunner:
             return
 
         except ImageNotFound:
-            print("Building sandbox image...")
+            print(f"Building image from {base_image}...")
 
-            context = Path(__file__).resolve().parent
-            repository_root = context.parent
+        context = Path(__file__).resolve().parent
+        repository_root = context.parent
 
-            subprocess.run(
-                [
-                    "docker", "build",
-                    "-t", self.image,
-                    "-f", str(context / "Dockerfile"),
-                    str(repository_root),
-                ],
-                check=True,
-            )
+        subprocess.run(
+            [
+                "docker", "build",
+                "--build-arg", f"BASE_IMAGE={base_image}",
+                "-t", self.image,
+                "-f", str(context / "Dockerfile"),
+                str(repository_root),
+            ],
+            check=True,
+        )
 
-            print("Image built successfully.")
+        print("Image built successfully.")
 
 
     def _initialize_volumes(self) -> None:
@@ -295,7 +315,12 @@ class DockerRunner:
 
             # 2. Check whether MCP reported an error
             if result.isError:
-                raise RuntimeError("MCP tool reported an error")
+                error_text = "\n".join(
+                    item.text
+                    for item in result.content
+                    if item.type == "text"
+                )
+                raise RuntimeError(error_text or "MCP tool reported an error")
 
             # 3. Extract text from the MCP response
             texts = [
@@ -420,12 +445,16 @@ class DockerRunner:
     async def run(
         self,
         code: str,
-        discovered_tool_names: list[str] | None = None,
+        tools: list[str] | None = None,
     ) -> ExecutionResult:
         """Execute code in an isolated container and return the result."""
 
         container = None
         connection = None
+        discovered_tool_names = [
+            tool.name
+            for tool in tools
+        ]
 
         try:
             # 1. Validate authorized imports
@@ -437,6 +466,7 @@ class DockerRunner:
             )
 
             print("[DEBUG] Created container:", container.short_id, flush=True)
+            self.mcp_manager.set_container_id(container.id)
             # 3. Attach to stdin before starting
             connection = container.attach_socket(
                 params={
@@ -451,9 +481,17 @@ class DockerRunner:
             print("[DEBUG] Container started", flush=True)
 
             # 5. Send code as one JSON line and MCP tools
+            discovered_tools = [
+                {
+                    "name": tool.name,
+                    "inputSchema": tool.inputSchema,
+                }
+                for tool in (tools or [])
+            ]
+
             message = json.dumps({
                 "code": code,
-                "tools": discovered_tool_names or [],
+                "tools": discovered_tools,
             }) + "\n"
 
             connection._sock.sendall(

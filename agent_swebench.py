@@ -100,7 +100,7 @@ class SWEBenchCLI:
                     args=[str(mcp_script)],
                 )
 
-            sandbox = Sandbox(sandbox_config, mcp_manager)
+            sandbox = Sandbox(sandbox_config, mcp_manager, task)
             # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
                 sandbox.get_manual("swebench"))

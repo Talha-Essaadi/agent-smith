@@ -1,10 +1,27 @@
 
 from typing import Any
-
 from mcp.types import CallToolResult
-
+import os
 from sandbox.mcp_client import MCPClient
 from sandbox.tool_registry import ToolRegistry
+from .exceptions import MCPConnectionError
+import httpx
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """Check whether an exception contains an HTTP connection error."""
+
+    if isinstance(exc, httpx.ConnectError):
+        return True
+
+    if isinstance(exc, BaseExceptionGroup):
+        return any(
+            _is_connection_error(child)
+            for child in exc.exceptions
+        )
+
+    return False
+
 
 
 class MCPManager:
@@ -57,6 +74,7 @@ class MCPManager:
             finally:
                 raise
 
+
     async def connect_http(
         self,
         server_name: str,
@@ -72,27 +90,40 @@ class MCPManager:
         client = MCPClient()
 
         try:
-            # Connect to the MCP server.
+            # 1. Connect to the MCP server.
             await client.connect_http(url)
 
-            # Discover tools.
+            # 2. Discover tools.
             tools = await client.list_tools()
 
-            # Register tools.
+            # 3. Register tools.
             self.registry.register_many(
                 server_name,
                 tools,
             )
 
-            # Store connected client.
+            # 4. Store connected client.
             self.clients[server_name] = client
 
-        except BaseException:
+        except BaseException as exc:
+            # 5. Roll back partial registration.
             self.registry.unregister_server(server_name)
+
+            # 6. Close the partially connected client.
             try:
                 await client.close()
-            finally:
-                raise
+            except Exception:
+                pass
+
+            # 7. Convert connection errors to readable errors.
+            if _is_connection_error(exc):
+                raise MCPConnectionError(
+                    f"Cannot connect to MCP server at {url}"
+                ) from None
+
+            # 8. Preserve unexpected errors and cancellation.
+            raise
+
 
     async def call_tool(
         self,
@@ -163,3 +194,18 @@ class MCPManager:
         """Return the names of connected MCP servers."""
 
         return list(self.clients.keys())
+
+    async def close(self) -> None:
+        """Close all MCP connections and unregister their tools."""
+
+        try:
+            for server_name, client in list(self.clients.items()):
+                try:
+                    await client.close()
+                finally:
+                    self.registry.unregister_server(server_name)
+        finally:
+            self.clients.clear()
+
+    def set_container_id(self, container_id: str) -> None:
+        os.environ["SWEBENCH_CONTAINER_ID"] = container_id
