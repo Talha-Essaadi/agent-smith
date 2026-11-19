@@ -28,7 +28,7 @@ class SandboxConfig(BaseModel):
             "/testbed", "/tmp/agent"
         ]
     )
-    max_execution_time_seconds: int = Field(default=5, gt=0)
+    max_execution_time_seconds: int = Field(default=30, gt=0)
     max_memory_mb: int = Field(default=512, gt=6) # Must be more than 6MB
     max_output_bytes: int = Field(default=100 * 1024, gt=0)  # 100 KB
     max_disk_usage_mb: int = Field(default=100, gt=0)
@@ -61,7 +61,7 @@ class ExecutionResult(BaseModel):
     timed_out: bool = False
     truncated: bool = False
     is_final_answer: bool = False
-    resource_limit_exceeded: bool = True
+    resource_limit_exceeded: bool = False
     final_answer_value: Optional[str] = None
 
     def to_observation_string(self) -> str:
@@ -86,8 +86,10 @@ class ExecutionResult(BaseModel):
                 "Use more specific queries or smaller line ranges.]"
             )
         if not parts and not self.is_final_answer:
-            return "[Execution completed successfully with no output. "
-            "Remember to use print() to inspect variables or tool results.]"
+            return (
+                "[Execution completed successfully with no output. "
+                "Remember to use print() to inspect variables or tool results.]"
+            )
         return "\n\n".join(parts)
 
 
@@ -102,7 +104,7 @@ class BaseSandbox(ABC):
         pass
 
     @abstractmethod
-    def get_manual(self) -> str:
+    def get_manual(self, type: str) -> str:
         """Returns dynamically generated documentation
          for connected MCP tools + final_answer."""
         pass

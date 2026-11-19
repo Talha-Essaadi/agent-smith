@@ -3,6 +3,7 @@ from agent.extractor import CodeExtractor, ExtractionResult
 from agent.orchestrator import AgentOrchestrator
 from agent.llm import KeyManager, LLMClient, LLMResponse
 from agent.prompts import PromptBuilder
+from agent.swebench_docker import SWEBenchDockerManager
 
 __all__ = [
     "AgentConfig",
@@ -14,5 +15,6 @@ __all__ = [
     "LLMClient",
     "LLMResponse",
     "PromptBuilder",
+    "SWEBenchDockerManager",
     "resolve_llm_settings",
 ]
