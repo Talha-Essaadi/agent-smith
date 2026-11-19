@@ -15,9 +15,8 @@ import json
 import select
 import time
 import os
-from docker.errors import ImageNotFound
+from pathlib import Path
 
-from .swebench_docker import SWEBenchDockerManager
 
 
 def _extract_frames(buffer: bytearray):
@@ -45,24 +44,22 @@ class DockerRunner:
         self.config = config
         self.client = docker.from_env()
         self.image = "agent-sandbox:latest"
-        self.testbed_volume = self.client.volumes.create(
-            name=f"agent-testbed"
-        )
-        self.agent_volume = self.client.volumes.create(
-            name=f"agent-tmp"
-        )
         if task:
-            swe_docker = SWEBenchDockerManager(task.docker_image)
-            name = str(swe_docker.get_testbed_path())
-            self.testbed_volume = self.client.volumes.create(
-                name=name
-            )
+            self.image = task.docker_image
+
+        workspace_root = Path.home() / "agent-workspaces"
+
+        self.testbed_path = workspace_root / "testbed"
+        self.agent_path = workspace_root / "tmp-agent"
+
+        # Create directories if they do not exist
+        self.testbed_path.mkdir(parents=True, exist_ok=True)
+        self.agent_path.mkdir(parents=True, exist_ok=True)
 
         self.import_guard = ImportGuard(
             config.authorized_imports
         )
         self._ensure_image(task)
-        self._initialize_volumes()
         self.mcp_manager = mcp_manager
 
     def _ensure_image(
@@ -107,27 +104,6 @@ class DockerRunner:
 
         print("Image built successfully.")
 
-
-    def _initialize_volumes(self) -> None:
-        """Set volume ownership to the non-root sandbox user."""
-        init = self.client.containers.create(
-            image=self.image,
-            command=[
-                "sh", "-c",
-                "chown -R 65534:65534 /testbed /tmp/agent"
-            ],
-            user="0:0",
-            volumes={
-                self.testbed_volume.name: {
-                    "bind": "/testbed",
-                    "mode": "rw",
-                },
-                self.agent_volume.name: {
-                    "bind": "/tmp/agent",
-                    "mode": "rw",
-                },
-            },
-        )
 
         try:
             init.start()
@@ -231,17 +207,17 @@ class DockerRunner:
             "tty": False,
             "detach": True,
             # Privilege restrictions
-            "user": "65534:65534",
+            "user": "0:0",
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
             # Filesystem restrictions
             "read_only": True,
             "volumes": {
-                f"{self.testbed_volume.name}": {
+                f"{str(self.testbed_path)}": {
                     "bind": "/testbed",
                     "mode": "rw",
                 },
-                f"{self.agent_volume.name}": {
+                f"{str(self.agent_path)}": {
                     "bind": "/tmp/agent",
                     "mode": "rw",
                 },
@@ -625,15 +601,15 @@ class DockerRunner:
     def _cleanup_volumes(self) -> None:
         """Remove task volumes."""
 
-        for volume in (self.testbed_volume, self.agent_volume):
+        for volume in (self.testbed_path, self.agent_path):
             if volume is not None:
                 try:
                     volume.remove()
                 except docker.errors.DockerException:
                     pass
 
-        self.testbed_volume = None
-        self.agent_volume = None
+        self.testbed_path = None
+        self.agent_path = None
 
     def close(self) -> None:
         """Close the Docker client."""

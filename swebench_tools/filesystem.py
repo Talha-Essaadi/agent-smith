@@ -3,6 +3,9 @@ import fnmatch
 import os
 # from sandbox.docker_backend import run_in_container
 
+TESTBED_ROOT = (
+    Path.home() / "agent-workspaces" / "testbed"
+).resolve()
 
 def pwd() -> str:
     """Return the working directory inside the SWE-bench container."""
@@ -10,30 +13,54 @@ def pwd() -> str:
     return os.getcwd()
 
 
-# All filesystem operations are restricted to the SWE-bench repository.
-TESTBED_ROOT = Path("/testbed").resolve()
 
 
-def _resolve_path(path: str) -> Path:
-    """
-    Resolve a path and ensure it stays inside /testbed.
-    Accepts both relative and absolute paths.
-    """
-    candidate = Path(path)
+# def _resolve_path(path: str) -> Path:
+#     """
+#     Resolve a path and ensure it stays inside /testbed.
+#     Accepts both relative and absolute paths.
+#     """
+#     candidate = Path(path)
 
-    if not candidate.is_absolute():
-        candidate = TESTBED_ROOT / candidate
+#     if not candidate.is_absolute():
+#         candidate = TESTBED_ROOT / candidate
 
-    resolved = candidate.resolve()
+#     resolved = candidate.resolve()
 
-    try:
-        resolved.relative_to(TESTBED_ROOT)
-    except ValueError:
-        raise PermissionError(
-            f"Access denied: '{path}' is outside {TESTBED_ROOT}"
+#     try:
+#         resolved.relative_to(TESTBED_ROOT)
+#     except ValueError:
+#         raise PermissionError(
+#             f"Access denied: '{path}' is outside {TESTBED_ROOT}"
+#         )
+
+#     return resolved
+
+
+def _resolve_path(directory: str) -> Path:
+    """Resolve a directory inside the shared workspace."""
+
+    requested = Path(directory)
+
+    # Support Docker-style paths such as /testbed/src
+    if requested.is_absolute():
+        try:
+            requested = requested.relative_to("/testbed")
+        except ValueError:
+            raise ValueError(
+                "Absolute paths must be inside /testbed"
+            ) from None
+
+    path = (TESTBED_ROOT / requested).resolve()
+
+    # Prevent access outside the shared workspace
+    if not path.is_relative_to(TESTBED_ROOT):
+        raise ValueError(
+            f"Access outside shared workspace is forbidden: {directory}"
         )
 
-    return resolved
+    return path
+
 
 
 def read_file(filepath: str, start_line: int, end_line: int) -> str:
@@ -104,18 +131,19 @@ def edit_file(filepath: str, old_str: str, new_str: str) -> str:
     return f"Successfully edited {filepath}"
 
 
-def list_files(directory: str, pattern: str = "*") -> str:
+
+def list_files(directory: str = ".", pattern: str = "*") -> str:
     """
-    List files matching a glob-style pattern in a directory.
+    List files in the shared Docker workspace.
 
     Examples:
         list_files(".", "*.py")
         list_files("src", "*.c")
         list_files("agent", "**/*.py")
+        list_files("/testbed", "*.py")
     """
-    # path = _resolve_path(directory)
-    path = Path(directory)
-    print("****", path)
+
+    path = _resolve_path(directory)
 
     if not path.exists():
         raise FileNotFoundError(f"Directory not found: {directory}")
@@ -123,26 +151,32 @@ def list_files(directory: str, pattern: str = "*") -> str:
     if not path.is_dir():
         raise NotADirectoryError(f"Not a directory: {directory}")
 
-    if not pattern:
-        pattern = "*"
-
+    pattern = pattern or "*"
     results = []
 
     for item in path.rglob("*"):
-        # Do not follow symlinks outside the repository.
         try:
-            resolved = item.resolve()
-            resolved.relative_to(TESTBED_ROOT)
-        except (ValueError, OSError):
+            if not item.is_file():
+                continue
+
+            # Skip symbolic links pointing outside the workspace
+            item.resolve().relative_to(TESTBED_ROOT)
+
+        except (ValueError, OSError, RuntimeError):
             continue
 
-        if item.is_file() and fnmatch.fnmatch(item.relative_to(path).as_posix(), pattern):
-            results.append(str(item.relative_to(TESTBED_ROOT)))
+        relative_path = item.relative_to(path).as_posix()
 
-
+        if fnmatch.fnmatch(relative_path, pattern):
+            results.append(
+                item.relative_to(TESTBED_ROOT).as_posix()
+            )
 
     if not results:
-        return f"No files matching '{pattern}' found in '{directory}'."
+        return (
+            f"No files matching '{pattern}' "
+            f"found in '{directory}'."
+        )
 
     return "\n".join(sorted(results))
 
