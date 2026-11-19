@@ -180,7 +180,7 @@ class MCPManager:
                 errors.append(exc)
 
         if errors:
-            raise ExceptionGroup(
+            raise RuntimeError(
                 "Failed to close some MCP connections",
                 errors,
             )
