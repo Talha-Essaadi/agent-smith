@@ -14,5 +14,6 @@ __all__ = [
     "LLMClient",
     "LLMResponse",
     "PromptBuilder",
+    "SWEBenchDockerManager",
     "resolve_llm_settings",
 ]
