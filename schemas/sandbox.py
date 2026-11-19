@@ -104,7 +104,7 @@ class BaseSandbox(ABC):
         pass
 
     @abstractmethod
-    def get_manual(self) -> str:
+    def get_manual(self, type: str) -> str:
         """Returns dynamically generated documentation
          for connected MCP tools + final_answer."""
         pass
