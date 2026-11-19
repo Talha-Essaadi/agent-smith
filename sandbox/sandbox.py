@@ -6,10 +6,10 @@ from sandbox.runner import DockerRunner
 from textwrap import dedent
 
 class Sandbox(BaseSandbox):
-    def __init__(self, config: SandboxConfig, mcp_manager: MCPManager) -> None:
+    def __init__(self, config: SandboxConfig, mcp_manager: MCPManager, task=None) -> None:
         self.config = config
         self.mcp_manager = mcp_manager
-        self._runner = DockerRunner(config, mcp_manager)
+        self._runner = DockerRunner(config, mcp_manager, task)
         # self.tool_registry = self._runner.tool_registry
 
     async def execute(self, code: str) -> ExecutionResult:
@@ -34,7 +34,7 @@ class Sandbox(BaseSandbox):
 
         # 1. Sandbox restrictions
         restrictions = dedent(f"""
-            ## Sandbox Restrictions
+            ## Sandbox Restrictionsagent-sandbox:latest
 
             Authorized imports:
             {", ".join(config.authorized_imports)}

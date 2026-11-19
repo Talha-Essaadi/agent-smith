@@ -17,6 +17,8 @@ import time
 import os
 from docker.errors import ImageNotFound
 
+from .swebench_docker import SWEBenchDockerManager
+
 
 def _extract_frames(buffer: bytearray):
     frames = []
@@ -43,14 +45,18 @@ class DockerRunner:
         self.config = config
         self.client = docker.from_env()
         self.image = "agent-sandbox:latest"
-        if task:
-            self.image = task.docker_image
         self.testbed_volume = self.client.volumes.create(
             name=f"agent-testbed"
         )
         self.agent_volume = self.client.volumes.create(
             name=f"agent-tmp"
         )
+        if task:
+            swe_docker = SWEBenchDockerManager(task.docker_image)
+            name = str(swe_docker.get_testbed_path())
+            self.testbed_volume = self.client.volumes.create(
+                name=name
+            )
 
         self.import_guard = ImportGuard(
             config.authorized_imports
@@ -61,7 +67,7 @@ class DockerRunner:
 
     def _ensure_image(
         self,
-        task_image: str | None = None,
+        task: str | None = None,
     ) -> None:
         """Ensure the correct sandbox image exists."""
 
@@ -466,7 +472,7 @@ class DockerRunner:
             )
 
             print("[DEBUG] Created container:", container.short_id, flush=True)
-            self.mcp_manager.set_container_id(container.id)
+            # self.mcp_manager.set_container_id(container.id)
             # 3. Attach to stdin before starting
             connection = container.attach_socket(
                 params={

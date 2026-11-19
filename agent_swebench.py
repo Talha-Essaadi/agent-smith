@@ -6,7 +6,7 @@ import sys
 import os
 from dotenv import load_dotenv
 
-from agent import AgentConfig, resolve_llm_settings, SWEBenchDockerManager
+from agent import AgentConfig, resolve_llm_settings
 from agent import PromptBuilder, AgentOrchestrator, LLMClient
 from sandbox import Sandbox, MCPManager
 from schemas import SWEBenchTaskInput, SolutionOutput, SandboxConfig
@@ -72,15 +72,15 @@ class SWEBenchCLI:
             # Load task
             task = self._load_task()
             # Initialize SWEDockerManager and get container and testbed dir
-            docker_manager = SWEBenchDockerManager(task.docker_image)
-            container_id, testbed_dir = await asyncio.to_thread(docker_manager.start)
+            # docker_manager = SWEBenchDockerManager(task.docker_image)
+            # container_id, testbed_dir = await asyncio.to_thread(docker_manager.start)
             # Set environment variables for MCP tools
-            mcp_env = os.environ.copy()
-            mcp_env.update({
-                "TESTBED_PATH": str(testbed_dir),
-                "SWE_CONTAINER_ID": container_id,
-                "SWE_EVAL_SCRIPT": task.eval_script
-            })
+            # mcp_env = os.environ.copy()
+            # mcp_env.update({
+            #     "TESTBED_PATH": str(testbed_dir),
+            #     "SWE_CONTAINER_ID": container_id,
+            #     "SWE_EVAL_SCRIPT": task.eval_script
+            # })
             # Initialize LLM client
             llm_client = LLMClient(model_name=model_name,
                                    provider_url=provider_url,
@@ -98,7 +98,7 @@ class SWEBenchCLI:
                     server_name="swebench",
                     command=parts[0],
                     args=parts[1:],
-                    env=mcp_env,
+                    # env=mcp_env,
                 )
             elif self.args.mcp_server:
                 await mcp_manager.connect_http(
@@ -111,10 +111,10 @@ class SWEBenchCLI:
                     server_name="swebench",
                     command=sys.executable,
                     args=[str(mcp_script)],
-                    env=mcp_env,
+                    # env=mcp_env,
                 )
 
-            sandbox = Sandbox(sandbox_config, mcp_manager)
+            sandbox = Sandbox(sandbox_config, mcp_manager, task)
             # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
                 sandbox.get_manual("swebench"))
@@ -127,21 +127,21 @@ class SWEBenchCLI:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
-        except Exception as e:
-            # Build a minimal failure output so we always produce valid JSON
-            task_id = str(task.instance_id) if task else "unknown"
-            solution_output = SolutionOutput(
-                task_id=task_id,
-                benchmark="swebench",
-                success=False,
-                solution="",
-                iterations=0,
-                total_requests=0,
-                total_input_tokens=0,
-                total_output_tokens=0,
-                total_time_seconds=0.0,
-                error=str(e),
-            )
+        # except Exception as e:
+        #     # Build a minimal failure output so we always produce valid JSON
+        #     task_id = str(task.instance_id) if task else "unknown"
+        #     solution_output = SolutionOutput(
+        #         task_id=task_id,
+        #         benchmark="swebench",
+        #         success=False,
+        #         solution="",
+        #         iterations=0,
+        #         total_requests=0,
+        #         total_input_tokens=0,
+        #         total_output_tokens=0,
+        #         total_time_seconds=0.0,
+        #         error=str(e),
+        #     )
         finally:
             try:
                 if solution_output is not None:

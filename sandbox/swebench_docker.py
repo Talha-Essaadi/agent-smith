@@ -35,19 +35,7 @@ class SWEBenchDockerManager:
             tmp_container.remove(force=True)
         return target
 
-    def _launch_container(self) -> "docker.models.containers.Container":
-        return self.client.containers.run(
-            self.docker_image,
-            command=["sleep", "infinity"],
-            detach=True,
-            working_dir="/testbed",
-            network_mode="none",
-            volumes={
-                str(self._testbed_dir): {"bind": "/testbed", "mode": "rw"}
-            })
-
-
-    def start(self) -> Tuple[str, Path]:
+    def get_testbed_path(self) -> str:
         if self.container is not None:
             raise RuntimeError(
                 "Container already started; call close() first.")
@@ -55,11 +43,10 @@ class SWEBenchDockerManager:
             self._ensure_image()
             self._temp_root = Path(tempfile.mkdtemp(prefix="swebench_"))
             self._testbed_dir = self._extract_testbed()
-            self.container = self._launch_container()
         except BaseException:
             self.close()
             raise
-        return self.container.id, self._testbed_dir
+        return str(self._testbed_dir)
 
     def close(self) -> None:
         if self.container is not None:
@@ -89,4 +76,4 @@ class SWEBenchDockerManager:
         if self._testbed_dir is None:
             raise RuntimeError(
                 "testbed directory not initialized. Call start() first.")
-        return self._testbed_dir
+        return str(self._testbed_dir)
