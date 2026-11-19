@@ -17,7 +17,7 @@ import time
 import os
 from pathlib import Path
 
-
+from .swebench_docker import SWEBenchDockerManager
 
 def _extract_frames(buffer: bytearray):
     frames = []
@@ -44,17 +44,21 @@ class DockerRunner:
         self.config = config
         self.client = docker.from_env()
         self.image = "agent-sandbox:latest"
-        if task:
-            self.image = task.docker_image
 
         workspace_root = Path.home() / "agent-workspaces"
+
 
         self.testbed_path = workspace_root / "testbed"
         self.agent_path = workspace_root / "tmp-agent"
 
+        if task:
+            self.image = task.docker_image
+            swe_docker =  SWEBenchDockerManager(self.image)
+            self.testbed_path = swe_docker.get_testbed_path()
+
         # Create directories if they do not exist
-        self.testbed_path.mkdir(parents=True, exist_ok=True)
-        self.agent_path.mkdir(parents=True, exist_ok=True)
+        # self.testbed_path.mkdir(parents=True, exist_ok=True)
+        # self.agent_path.mkdir(parents=True, exist_ok=True)
 
         self.import_guard = ImportGuard(
             config.authorized_imports
