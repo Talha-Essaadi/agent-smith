@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Dict, Optional
 import time
 
@@ -59,9 +60,11 @@ class AgentOrchestrator:
                 break
             try:
                 step_cap = 500 if benchmark.lower() == "mbpp" else 1500
-                llm_resp = self.llm_client.generate(messages,
-                                                    max_tokens=min(step_cap,
-                                                                   rem_out))
+                llm_resp = await asyncio.to_thread(
+                    self.llm_client.generate,
+                    messages,
+                    min(step_cap, rem_out),
+                )
             except Exception as e:
                 error_msg = str(e)
                 break
