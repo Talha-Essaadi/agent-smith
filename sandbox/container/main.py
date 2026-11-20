@@ -22,6 +22,7 @@ protocol_in = sys.stdin
 protocol_out = sys.stdout
 
 try:
+    # Abdo Debug # These stderr debug prints add noise that can interfere with output checks.
     print("[DEBUG] Waiting for code...", file=sys.stderr, flush=True)
 
     message = json.loads(protocol_in.readline())
@@ -47,6 +48,8 @@ try:
 
     try:
         with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+            # Abdo Debug # Default builtins allow __import__, eval, exec, compile, input and breakpoint.
+            # Abdo Debug # ImportGuard checks import statements but cannot block these builtin calls.
             exec(generated_code, namespace)
 
     except FinalAnswerSignal as exc:
@@ -64,5 +67,6 @@ except Exception:
     print(result["error"], file=sys.stderr, flush=True)
 
 finally:
+    # Abdo Debug # Untrusted code can access this writable result file and tamper with answers.
     with open("/tmp/agent/result.json", "w") as f:
         json.dump(result, f)

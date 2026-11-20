@@ -21,6 +21,7 @@ class Sandbox(BaseSandbox):
             tools,
         )
 
+    # we have to minimize the return because of token budget
     def get_manual(self, type: str) -> str:
         # Return instructions available to the agent
 

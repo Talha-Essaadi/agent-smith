@@ -136,6 +136,7 @@ class LLMClient:
                     response_code = data["error"].get("code")
                 elif not choices:
                     time.sleep(2 ** attempt)
+                    continue
                 else:
                     return self._parse_response_to_llmresponse(
                         messages, data, attempt, response_time)

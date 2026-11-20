@@ -7,6 +7,7 @@ from typing import Optional
 from schemas.sandbox import ExecutionResult
 
 
+# Abdo Debug # This hardcoded root ignores TESTBED_PATH set by the moulinette's isolated tests.
 TESTBED_ROOT = "/testbed"
 COMMAND_TIMEOUT = 30
 MAX_OUTPUT_CHARS = 50_000
@@ -28,6 +29,7 @@ def configure_runner(runner) -> None:
 
 def _get_runner():
     if _runner is None:
+        # Abdo Debug # MCP startup never calls configure_runner(), so execution tools raise here.
         raise RuntimeError(
             "DockerRunner is not configured. "
             "Call configure_runner() first."
@@ -37,6 +39,7 @@ def _get_runner():
 
 def _execute_python(code: str) -> ExecutionResult:
     """Execute Python code through the Docker sandbox."""
+    # Abdo Debug # DockerRunner.run() is async; this returns a coroutine, not an ExecutionResult.
     return _get_runner().run(code)
 
 
@@ -82,6 +85,7 @@ def run_command(command: str, workdir: str) -> str:
         raise ValueError("command cannot be empty")
 
     # Generate Python code executed inside the sandbox.
+    # Abdo Debug # ImportGuard blocks these imports; MCP tools must run outside this security domain.
     # repr() safely encodes user-provided strings as Python literals.
     code = f'''
 import os
@@ -159,6 +163,7 @@ def run_tests() -> str:
     """
     Run the configured SWE-bench test command inside Docker.
     """
+    # TEST_COMMAND defaults to pytest instead of running the task's actual eval_script.
     return run_command(
         command=TEST_COMMAND,
         workdir=TESTBED_ROOT
@@ -173,6 +178,8 @@ def get_patch() -> str:
     """
     Retrieve staged and unstaged changes compared with HEAD.
     """
+    # run_command() adds status text, so final_answer(get_patch()) submits an invalid diff.
+    # This git command also lacks the required -c core.fileMode=false option.
     return run_command(
         command="git diff --no-ext-diff --no-color --unified=3 HEAD --",
         workdir=TESTBED_ROOT

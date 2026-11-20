@@ -8,6 +8,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, Tool
 
 
+# Abdo Debug # This client supports tools only; resource and prompt discovery and calls are missing.
 class MCPClient:
     """Manage one MCP server connection."""
 

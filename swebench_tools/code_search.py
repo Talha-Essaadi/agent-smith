@@ -4,6 +4,7 @@ import fnmatch
 from pathlib import Path
 
 
+# Abdo Debug # This hardcoded root ignores TESTBED_PATH and differs from filesystem.py's root.
 TESTBED_ROOT = Path("/testbed").resolve()
 
 
@@ -80,6 +81,7 @@ def search_code(pattern: str, file_pattern: str = "*") -> str:
 
         for line_number, line in enumerate(content.splitlines(), start=1):
             if pattern in line:
+                # Abdo Debug # read_file maps this /testbed path to another root and may not find the file.
                 results.append(
                     f"{filepath}:{line_number} {line}"
                 )

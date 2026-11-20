@@ -147,6 +147,7 @@ class MBPPCLI:
 
 
 def main():
+    # Abdo Debug # No SIGTERM handler is registered, so termination can skip resource cleanup.
     cli = MBPPCLI()
     asyncio.run(cli.run())
 

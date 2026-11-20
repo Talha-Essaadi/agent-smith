@@ -3,6 +3,7 @@ import fnmatch
 import os
 # from sandbox.docker_backend import run_in_container
 
+# Abdo Debug # This hardcoded root ignores TESTBED_PATH set by the moulinette's isolated tests.
 TESTBED_ROOT = (
     Path.home() / "agent-workspaces" / "testbed"
 ).resolve()
@@ -43,6 +44,8 @@ def _resolve_path(directory: str) -> Path:
     requested = Path(directory)
 
     # Support Docker-style paths such as /testbed/src
+    # Abdo Debug # Search uses /testbed directly, but read_file maps it to a different local root.
+    # Abdo Debug # Absolute paths under a custom TESTBED_PATH are rejected here.
     if requested.is_absolute():
         try:
             requested = requested.relative_to("/testbed")
@@ -70,6 +73,7 @@ def read_file(filepath: str, start_line: int, end_line: int) -> str:
     Line numbers are 1-based and inclusive.
     Output includes line numbers, similar to `cat -n`.
     """
+    # Abdo Debug # This debug print writes to stdout and can corrupt MCP stdio JSON-RPC messages.
     print(f"*********************{pwd()}")
     if start_line < 1:
         raise ValueError("start_line must be >= 1")
@@ -126,6 +130,7 @@ def edit_file(filepath: str, old_str: str, new_str: str) -> str:
 
     updated_content = content.replace(old_str, new_str, 1)
 
+    # Abdo Debug # Edited Python is saved without syntax validation, so invalid code is reported as success.
     path.write_text(updated_content, encoding="utf-8")
 
     return f"Successfully edited {filepath}"

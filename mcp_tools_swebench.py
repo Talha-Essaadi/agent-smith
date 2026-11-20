@@ -43,6 +43,7 @@ mcp.tool()(find_references)
 # Execution tools
 # -----------------------------
 
+# Abdo Debug # configure_runner() is never called, so these tools have no DockerRunner.
 mcp.tool()(run_tests)
 mcp.tool()(get_patch)
 mcp.tool()(run_command)

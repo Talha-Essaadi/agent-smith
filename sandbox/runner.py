@@ -129,6 +129,7 @@ class DockerRunner:
         except docker.errors.DockerException as exc:
             logging.warning("Could not kill timed-out container: %s", exc)
 
+        # Abdo Debug # Partial stdout and stderr are not collected or returned on timeout.
         return ExecutionResult(
             error="Execution timed out.",
             timed_out=True,
@@ -204,18 +205,21 @@ class DockerRunner:
         
         return {
             "image": self.image,
-            "command": ["python", "/testbed/main.py"],
+            "command": ["python", "/opt/agent/main.py"], # change the main path
             "working_dir": "/testbed",
             "network_mode": "none",
             "stdin_open": True,
             "tty": False,
             "detach": True,
             # Privilege restrictions
+            # Abdo Debug # The sandbox runs untrusted code as root instead of an unprivileged user.
             "user": "0:0",
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
             # Filesystem restrictions
+            # Abdo Debug # Read-only mode blocks writes but still allows reads outside allowed paths.
             "read_only": True,
+            # Abdo Debug # These fixed mounts ignore config.allowed_directories, including custom paths.
             "volumes": {
                 f"{str(self.testbed_path)}": {
                     "bind": "/testbed",
@@ -239,6 +243,7 @@ class DockerRunner:
     def _read_final_answer(self, container) -> dict:
         """Read the final answer result from the Docker container."""
 
+        # Abdo Debug # This trusts result.json from a directory writable by untrusted code.
         archive, _ = container.get_archive("/tmp/agent/result.json")
 
         with tarfile.open(fileobj=io.BytesIO(b"".join(archive)), mode="r:*") as tar:
@@ -404,6 +409,7 @@ class DockerRunner:
                                 "Sandbox execution timed out"
                             )
 
+                        # Abdo Debug # External MCP actions share the Python deadline, so long tests time out.
                         response = await asyncio.wait_for(
                             self._dispatch_tool_request(request),
                             timeout=remaining_time,
@@ -431,7 +437,7 @@ class DockerRunner:
     async def run(
         self,
         code: str,
-        tools: list[str] | None = None,
+        tools: list[str] | None = None, # you have to handle tools=None case
     ) -> ExecutionResult:
         """Execute code in an isolated container and return the result."""
 
@@ -447,10 +453,12 @@ class DockerRunner:
             self.import_guard.validate(code)
 
             # 2. Create Docker container
+            # Abdo Debug # A fresh container on every run loses Python variables between steps.
             container = self.client.containers.create(
                 **self._build_container_config()
             )
 
+            # Abdo Debug # These stdout debug prints add noise that can interfere with automated tests.
             print("[DEBUG] Created container:", container.short_id, flush=True)
             # self.mcp_manager.set_container_id(container.id)
             # 3. Attach to stdin before starting
@@ -596,6 +604,7 @@ class DockerRunner:
                     print(f"[DEBUG] Attachment cleanup error: {exc}", flush=True)
 
             # 13. Remove container
+            # Abdo Debug # Removing the container also discards its Python namespace after each step.
             if container is not None:
                 try:
                     container.remove(force=True)
@@ -605,6 +614,8 @@ class DockerRunner:
     def _cleanup_volumes(self) -> None:
         """Remove task volumes."""
 
+        #  the testbed/agent path doesn't a volume object
+        #  you have to remove the tmp folders path
         for volume in (self.testbed_path, self.agent_path):
             if volume is not None:
                 try:

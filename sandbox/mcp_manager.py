@@ -24,6 +24,7 @@ def _is_connection_error(exc: BaseException) -> bool:
 
 
 
+# Abdo Debug # This manager exposes tools only, with no resource or prompt support.
 class MCPManager:
     """Manage MCP server connections and registered tools."""
 
@@ -195,6 +196,7 @@ class MCPManager:
 
         return list(self.clients.keys())
 
+    # Abdo Debug # This second close() definition silently replaces the earlier close() method.
     async def close(self) -> None:
         """Close all MCP connections and unregister their tools."""
 

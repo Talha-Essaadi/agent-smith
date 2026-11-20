@@ -134,6 +134,7 @@ async def interactive_loop(
 
         command = code.strip()
 
+        # Abdo Debug # Plain exit is not recognized; EOF is already handled above.
         if command in (":exit", ":quit"):
             break
 
@@ -219,6 +220,7 @@ async def async_main() -> None:
         await interactive_loop(runner, manager)
 
     finally:
+        # Abdo Debug # runner.close() is missing, so sandbox resources are not cleaned up here.
         await manager.close()
 
 

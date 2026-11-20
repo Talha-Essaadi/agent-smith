@@ -72,9 +72,11 @@ class SWEBenchCLI:
             # Load task
             task = self._load_task()
             # Initialize SWEDockerManager and get container and testbed dir
+            # Abdo Debug # This disabled setup never starts the task container or prepares its testbed.
             # docker_manager = SWEBenchDockerManager(task.docker_image)
             # container_id, testbed_dir = await asyncio.to_thread(docker_manager.start)
             # Set environment variables for MCP tools
+            # Abdo Debug # This disabled block leaves the MCP tools without the task's environment settings.
             # mcp_env = os.environ.copy()
             # mcp_env.update({
             #     "TESTBED_PATH": str(testbed_dir),
@@ -127,6 +129,7 @@ class SWEBenchCLI:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
+        # Abdo Debug # With this handler disabled, errors escape without creating a failure SolutionOutput.
         # except Exception as e:
         #     # Build a minimal failure output so we always produce valid JSON
         #     task_id = str(task.instance_id) if task else "unknown"
@@ -144,6 +147,7 @@ class SWEBenchCLI:
         #     )
         finally:
             try:
+                # Abdo Debug # If execution failed before producing a result, no solution.json is written.
                 if solution_output is not None:
                     output_path = Path(self.args.output)
                     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,6 +171,7 @@ class SWEBenchCLI:
 
 
 def main():
+    # Abdo Debug # No SIGTERM handler is registered, so termination can leave Docker containers behind.
     cli = SWEBenchCLI()
     asyncio.run(cli.run())
 
