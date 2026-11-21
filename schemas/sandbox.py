@@ -94,23 +94,22 @@ class ExecutionResult(BaseModel):
 
 
 class BaseSandbox(ABC):
-    """Abstract interface that Student 2's Sandbox
-     and our MockSandbox must implement."""
+    """Abstract interface that Sandbox and MockSandbox implement."""
 
     @abstractmethod
     async def execute(self, code: str) -> ExecutionResult:
         """Executes Python code in the sandbox namespace
-         and returns structured output."""
+        and returns structured output."""
         pass
 
     @abstractmethod
-    def get_manual(self, type: str) -> str:
+    def get_manual(self, type: str | None = None) -> str:
         """Returns dynamically generated documentation
-         for connected MCP tools + final_answer."""
+        for connected MCP tools + final_answer."""
         pass
 
     @abstractmethod
     def close(self) -> None:
         """Cleans up any subprocesses,
-         MCP connections, or Docker containers."""
+        MCP connections, or Docker containers."""
         pass
