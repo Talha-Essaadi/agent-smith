@@ -1,10 +1,11 @@
-
 import ast
 
 
 class ImportGuard:
+    """Static AST import validator using an allowlist
+     with `module.*` wildcards."""
 
-    def __init__(self, authorized_imports: list[str]):
+    def __init__(self, authorized_imports: list[str]) -> None:
         self.authorized_imports = authorized_imports
 
     def _is_allowed(self, module: str) -> bool:
@@ -26,17 +27,12 @@ class ImportGuard:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if not self._is_allowed(alias.name):
-                        raise ImportError(
-                            f"Unauthorized import: {alias.name}"
-                        )
+                        raise ImportError(f"Unauthorized import: {alias.name}")
 
             elif isinstance(node, ast.ImportFrom):
                 if node.level > 0:
                     raise ImportError("Relative imports are not allowed")
 
                 module = node.module or ""
-
                 if not self._is_allowed(module):
-                    raise ImportError(
-                        f"Unauthorized import: {module}"
-                    )
+                    raise ImportError(f"Unauthorized import: {module}")
