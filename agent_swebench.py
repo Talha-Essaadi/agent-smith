@@ -2,75 +2,118 @@ import argparse
 import asyncio
 from pathlib import Path
 import shlex
+import signal
 import sys
-import os
+
 from dotenv import load_dotenv
 
-from agent import AgentConfig, resolve_llm_settings
-from agent import PromptBuilder, AgentOrchestrator, LLMClient
-from sandbox import Sandbox, MCPManager
-from schemas import SWEBenchTaskInput, SolutionOutput, SandboxConfig
+from agent import (
+    AgentConfig,
+    AgentOrchestrator,
+    LLMClient,
+    PromptBuilder,
+    resolve_llm_settings,
+)
+from sandbox import MCPManager, Sandbox
+from schemas import SWEBenchTaskInput, SandboxConfig, SolutionOutput
 
 
 class SWEBenchCLI:
-    def __init__(self):
+    def __init__(self) -> None:
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument(
-            "--task-file", type=str,
-            required=True, help="Path to the task file"
+            "--task-file",
+            type=str,
+            required=True,
+            help="Path to the task file",
         )
         self.parser.add_argument(
-            "--output", type=str,
-            required=True, help="Path to the output file"
+            "--output",
+            type=str,
+            required=True,
+            help="Path to the output file",
         )
         self.parser.add_argument(
-            "--model-name", type=str,
+            "--model-name",
+            type=str,
             required=False,
             help="Name of the model to use (defaults to MODEL_NAME)",
         )
         self.parser.add_argument(
-            "--provider-url", type=str,
+            "--provider-url",
+            type=str,
             required=False,
             help="Base URL of the provider (defaults to PROVIDER_URL)",
         )
         self.parser.add_argument(
-            "--env-file", type=str,
-            required=False, help="Path to the provider API keys file"
+            "--env-file",
+            type=str,
+            required=False,
+            help="Path to the provider API keys file",
         )
         self.parser.add_argument(
-            "--max-iterations", type=int, required=False,
-            default=None, help="Maximum number of iterations"
+            "--max-iterations",
+            type=int,
+            required=False,
+            default=None,
+            help="Maximum number of iterations",
         )
         self.parser.add_argument(
-            "--mcp-stdio", type=str, required=False, default=None,
+            "--mcp-stdio",
+            type=str,
+            required=False,
+            default=None,
             help="Command used to launch a local MCP server",
         )
         self.parser.add_argument(
-            "--mcp-server", type=str, required=False, default=None,
+            "--mcp-server",
+            type=str,
+            required=False,
+            default=None,
             help="URL of a Streamable HTTP MCP server",
         )
         self.args = self.parser.parse_args()
 
     def _load_task(self) -> SWEBenchTaskInput:
-        task_file = self.args.task_file
-        with open(task_file, "r") as f:
-            task = f.read()
-        task = SWEBenchTaskInput.model_validate_json(task)
-        return task
+        task_path = Path(self.args.task_file)
+        return SWEBenchTaskInput.model_validate_json(
+            task_path.read_text(encoding="utf-8")
+        )
+
+    def _load_env(self) -> None:
+        if self.args.env_file:
+            load_dotenv(self.args.env_file, override=True)
+        else:
+            load_dotenv(override=False)
 
     async def run(self) -> None:
-        task = None
-        sandbox = None
-        mcp_manager = None
+        task: SWEBenchTaskInput | None = None
+        sandbox: Sandbox | None = None
+        mcp_manager: MCPManager | None = None
         docker_manager = None
+        system_prompt = ""
         solution_output: SolutionOutput | None = None
+
+        current_task = asyncio.current_task()
+        loop = asyncio.get_running_loop()
+
+        def _handle_sigterm() -> None:
+            if current_task is not None and not current_task.done():
+                current_task.cancel()
+
         try:
-            load_dotenv(self.args.env_file, override=True)
+            loop.add_signal_handler(signal.SIGTERM, _handle_sigterm)
+        except (NotImplementedError, RuntimeError):
+            pass
+
+        try:
+            self._load_env()
             model_name, provider_url = resolve_llm_settings(
-                self.args.model_name, self.args.provider_url,
+                self.args.model_name,
+                self.args.provider_url,
             )
-            # Load task
             task = self._load_task()
+
             # Initialize SWEDockerManager and get container and testbed dir
             # Abdo Debug # This disabled setup never starts the task container or prepares its testbed.
             # docker_manager = SWEBenchDockerManager(task.docker_image)
@@ -83,14 +126,18 @@ class SWEBenchCLI:
             #     "SWE_CONTAINER_ID": container_id,
             #     "SWE_EVAL_SCRIPT": task.eval_script
             # })
-            # Initialize LLM client
-            llm_client = LLMClient(model_name=model_name,
-                                   provider_url=provider_url,
-                                   env_file=self.args.env_file)
-            # Get limits
-            limits = AgentConfig().get_limits("swebench",
-                                              self.args.max_iterations)
-            # Initialize sandbox and MCP manager
+            mcp_env = None
+
+            llm_client = LLMClient(
+                model_name=model_name,
+                provider_url=provider_url,
+                env_file=self.args.env_file
+            )
+            limits = AgentConfig().get_limits(
+                "swebench",
+                self.args.max_iterations
+            )
+
             sandbox_config = SandboxConfig()
             mcp_manager = MCPManager()
 
@@ -100,7 +147,7 @@ class SWEBenchCLI:
                     server_name="swebench",
                     command=parts[0],
                     args=parts[1:],
-                    # env=mcp_env,
+                    env=mcp_env,
                 )
             elif self.args.mcp_server:
                 await mcp_manager.connect_http(
@@ -113,15 +160,15 @@ class SWEBenchCLI:
                     server_name="swebench",
                     command=sys.executable,
                     args=[str(mcp_script)],
-                    # env=mcp_env,
+                    env=mcp_env,
                 )
 
             sandbox = Sandbox(sandbox_config, mcp_manager, task)
-            # Build prompts
             system_prompt = PromptBuilder.build_swebench_system_prompt(
-                sandbox.get_manual("swebench"))
+                sandbox.get_manual("swebench")
+            )
             user_prompt = PromptBuilder.build_swebench_user_prompt(task)
-            # Initialize orchestrator
+
             orchestrator = AgentOrchestrator(llm_client, sandbox, limits)
             solution_output = await orchestrator.run(
                 task_id=str(task.instance_id),
@@ -129,29 +176,45 @@ class SWEBenchCLI:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
-        # Abdo Debug # With this handler disabled, errors escape without creating a failure SolutionOutput.
-        # except Exception as e:
-        #     # Build a minimal failure output so we always produce valid JSON
-        #     task_id = str(task.instance_id) if task else "unknown"
-        #     solution_output = SolutionOutput(
-        #         task_id=task_id,
-        #         benchmark="swebench",
-        #         success=False,
-        #         solution="",
-        #         iterations=0,
-        #         total_requests=0,
-        #         total_input_tokens=0,
-        #         total_output_tokens=0,
-        #         total_time_seconds=0.0,
-        #         error=str(e),
-        #     )
+        except asyncio.CancelledError:
+            task_id = str(task.instance_id) if task else "unknown"
+            solution_output = SolutionOutput(
+                task_id=task_id,
+                benchmark="swebench",
+                success=False,
+                solution="",
+                system_prompt=system_prompt,
+                iterations=0,
+                total_requests=0,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_time_seconds=0.0,
+                error="Terminated by signal",
+            )
+        except Exception as e:
+            # Build a minimal failure output so we always produce valid JSON
+            task_id = str(task.instance_id) if task else "unknown"
+            solution_output = SolutionOutput(
+                task_id=task_id,
+                benchmark="swebench",
+                success=False,
+                solution="",
+                iterations=0,
+                total_requests=0,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_time_seconds=0.0,
+                error=str(e),
+            )
         finally:
             try:
-                # Abdo Debug # If execution failed before producing a result, no solution.json is written.
                 if solution_output is not None:
                     output_path = Path(self.args.output)
                     output_path.parent.mkdir(parents=True, exist_ok=True)
-                    output_path.write_text(solution_output.model_dump_json(indent=2))
+                    output_path.write_text(
+                        solution_output.model_dump_json(indent=2),
+                        encoding="utf-8",
+                    )
             finally:
                 if mcp_manager is not None:
                     try:
@@ -171,7 +234,6 @@ class SWEBenchCLI:
 
 
 def main():
-    # Abdo Debug # No SIGTERM handler is registered, so termination can leave Docker containers behind.
     cli = SWEBenchCLI()
     asyncio.run(cli.run())
 
