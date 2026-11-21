@@ -1,16 +1,21 @@
-
 from contextlib import AsyncExitStack
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
-from mcp.types import CallToolResult, Tool
+from mcp.types import (
+    CallToolResult,
+    GetPromptResult,
+    Prompt,
+    ReadResourceResult,
+    Resource,
+    Tool,
+)
 
 
-# Abdo Debug # This client supports tools only; resource and prompt discovery and calls are missing.
 class MCPClient:
-    """Manage one MCP server connection."""
+    """Manage one MCP server connection (tools, resources, and prompts)."""
 
     def __init__(self) -> None:
         self._session: ClientSession | None = None
@@ -29,7 +34,6 @@ class MCPClient:
             args=args,
             env=env,
         )
-
         await self._connect(stdio_client(params))
 
     async def connect_http(self, url: str) -> None:
@@ -41,18 +45,13 @@ class MCPClient:
             raise RuntimeError("Already connected to an MCP server")
 
         stack = AsyncExitStack()
-
         try:
             streams = await stack.enter_async_context(transport)
-
             read, write = streams[0], streams[1]
-
             session = await stack.enter_async_context(
                 ClientSession(read, write)
             )
-
             await session.initialize()
-
         except BaseException:
             await stack.aclose()
             raise
@@ -64,20 +63,17 @@ class MCPClient:
     def _require_client(self) -> ClientSession:
         if not self._connected or self._session is None:
             raise RuntimeError("MCP client is not connected")
-
         return self._session
 
     async def list_tools(self) -> list[Tool]:
         """Discover tools exposed by the MCP server."""
         session = self._require_client()
-
         tools: list[Tool] = []
         cursor = None
 
         while True:
             result = await session.list_tools(cursor=cursor)
             tools.extend(result.tools)
-
             cursor = result.nextCursor
             if cursor is None:
                 break
@@ -91,16 +87,61 @@ class MCPClient:
     ) -> CallToolResult:
         """Call an MCP tool."""
         session = self._require_client()
+        return await session.call_tool(name, arguments=arguments or {})
 
-        return await session.call_tool(
-            name,
-            arguments=arguments or {},
-        )
+    async def list_resources(self) -> list[Resource]:
+        """Discover resources exposed by the MCP server (if supported)."""
+        session = self._require_client()
+        resources: list[Resource] = []
+        cursor = None
+
+        try:
+            while True:
+                result = await session.list_resources(cursor=cursor)
+                resources.extend(result.resources)
+                cursor = result.nextCursor
+                if cursor is None:
+                    break
+        except Exception:
+            return []
+
+        return resources
+
+    async def read_resource(self, uri: str) -> ReadResourceResult:
+        """Read an MCP resource by URI."""
+        session = self._require_client()
+        return await session.read_resource(uri)
+
+    async def list_prompts(self) -> list[Prompt]:
+        """Discover prompts exposed by the MCP server (if supported)."""
+        session = self._require_client()
+        prompts: list[Prompt] = []
+        cursor = None
+
+        try:
+            while True:
+                result = await session.list_prompts(cursor=cursor)
+                prompts.extend(result.prompts)
+                cursor = result.nextCursor
+                if cursor is None:
+                    break
+        except Exception:
+            return []
+
+        return prompts
+
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, str] | None = None,
+    ) -> GetPromptResult:
+        """Fetch an MCP prompt by name."""
+        session = self._require_client()
+        return await session.get_prompt(name, arguments=arguments or {})
 
     async def close(self) -> None:
         """Close the MCP connection."""
         stack = self._stack
-
         if stack is None:
             return
 
