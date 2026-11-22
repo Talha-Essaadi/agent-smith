@@ -14,6 +14,12 @@ from swebench_tools import (
 )
 import argparse
 
+import os
+from pathlib import Path
+from config.paths import TESTBED_PATH
+
+
+os.chdir(TESTBED_PATH)
 
 
 # Create the MCP server

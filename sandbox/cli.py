@@ -246,8 +246,8 @@ def main():
             )
         raise SystemExit(1) from None
 
-    # except Exception as exc:
-    #     print(f"Execution error: {exc}")
+    except Exception as exc:
+        print(f"Execution error: {exc}")
 
 
 if __name__ == "__main__":

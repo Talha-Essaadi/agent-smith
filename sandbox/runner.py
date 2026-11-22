@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 
 from .swebench_docker import SWEBenchDockerManager
+from config.paths import TESTBED_PATH, TMP_PATH
 
 def _extract_frames(buffer: bytearray):
     frames = []
@@ -45,20 +46,16 @@ class DockerRunner:
         self.client = docker.from_env()
         self.image = "agent-sandbox:latest"
 
-        workspace_root = Path.home() / "agent-workspaces"
 
 
-        self.testbed_path = workspace_root / "testbed"
-        self.agent_path = workspace_root / "tmp-agent"
+        self.testbed_path = TESTBED_PATH
+        self.agent_path = TMP_PATH
 
         if task:
             self.image = task.docker_image
+            print(f"Using task-specific Docker image: {self.image}")
             swe_docker =  SWEBenchDockerManager(self.image)
-            self.testbed_path = swe_docker.get_testbed_path()
-
-        # Create directories if they do not exist
-        # self.testbed_path.mkdir(parents=True, exist_ok=True)
-        # self.agent_path.mkdir(parents=True, exist_ok=True)
+            swe_docker.prepare_testbed()
 
         self.import_guard = ImportGuard(
             config.authorized_imports
@@ -82,7 +79,7 @@ class DockerRunner:
                 )
 
             base_image = task.docker_image
-            self.image = f"agent-sandbox:swe-{task.docker_image}"
+            self.image = base_image
 
         try:
             self.client.images.get(self.image)
