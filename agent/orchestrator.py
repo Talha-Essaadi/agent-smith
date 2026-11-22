@@ -89,7 +89,8 @@ class AgentOrchestrator:
                 exec_res = None
                 if not ext.is_valid:
                     sandbox_input = ""
-                    sandbox_output = (
+                    sandbox_output = ""
+                    feedback = (
                         ext.error or "[ERROR: No valid code block found.]"
                     )
                     is_final = False
@@ -102,6 +103,7 @@ class AgentOrchestrator:
                         obs = f"{ext.warning}\n\n{obs}"
                     obs = self._truncate_observation(obs)
                     sandbox_output = obs
+                    feedback = obs
                     is_final = exec_res.is_final_answer
 
                 step = StepMetrics(
@@ -114,6 +116,7 @@ class AgentOrchestrator:
                     llm_output=llm_resp.content,
                     sandbox_input=sandbox_input,
                     sandbox_output=sandbox_output,
+                    extraction_error=ext.error,
                     retries=llm_resp.retries
                 )
                 steps.append(step)
@@ -126,7 +129,7 @@ class AgentOrchestrator:
 
                 messages.append({
                     "role": "user",
-                    "content": f"Observation:\n{sandbox_output}"
+                    "content": f"Observation:\n{feedback}"
                 })
         except asyncio.CancelledError:
             error_msg = "Agent terminated by signal"
