@@ -64,9 +64,10 @@ async def connect_mcp(
         if not parts:
             raise ValueError("Empty MCP stdio command")
 
+        command = sys.executable if parts[0] in ("python", "python3") else parts[0]
         await manager.connect_stdio(
             server_name="stdio",
-            command=parts[0],
+            command=command,
             args=parts[1:],
         )
         return True
@@ -112,14 +113,19 @@ async def interactive_loop(
     manager: MCPManager,
 ) -> None:
     """Read Python code from the terminal and execute it."""
-    print(
-        "Agent Smith Sandbox "
-        "(type 'exit' or Ctrl+D to quit, ':tools' to list MCP tools)"
-    )
+    interactive = sys.stdin.isatty()
+    if interactive:
+        print(
+            "Agent Smith Sandbox "
+            "(type 'exit' or Ctrl+D to quit, ':tools' to list MCP tools)"
+        )
 
     while True:
         try:
-            code = await ainput("sandbox> ")
+            code = (
+                await ainput("sandbox> ")
+                if interactive else await asyncio.to_thread(sys.stdin.read)
+            )
         except EOFError:
             break
         except KeyboardInterrupt:
@@ -135,6 +141,8 @@ async def interactive_loop(
             continue
 
         if not command:
+            if not interactive:
+                break
             continue
 
         try:
@@ -144,16 +152,30 @@ async def interactive_loop(
             break
 
         if result.stdout:
-            sys.stdout.write(result.stdout)
-            if not result.stdout.endswith("\n"):
-                sys.stdout.write("\n")
-            sys.stdout.flush()
+            if interactive:
+                await aprint(
+                    result.stdout,
+                    end="" if result.stdout.endswith("\n") else "\n"
+                )
+            else:
+                print(
+                    result.stdout,
+                    end="" if result.stdout.endswith("\n") else "\n"
+                )
 
         if result.stderr:
-            sys.stderr.write(result.stderr)
-            if not result.stderr.endswith("\n"):
-                sys.stderr.write("\n")
-            sys.stderr.flush()
+            if interactive:
+                await aprint(
+                    result.stderr,
+                    end="" if result.stderr.endswith("\n") else "\n",
+                    use_stderr=True,
+                )
+            else:
+                print(
+                    result.stderr,
+                    end="" if result.stderr.endswith("\n") else "\n",
+                    file=sys.stderr
+                )
 
         if result.error:
             print(f"Error: {result.error}")
@@ -166,6 +188,9 @@ async def interactive_loop(
 
         if result.is_final_answer:
             print(f"Final answer: {result.final_answer_value}")
+
+        if not interactive:
+            break
 
 
 async def async_main() -> None:
