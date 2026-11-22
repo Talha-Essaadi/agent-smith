@@ -1,7 +1,8 @@
 import shutil
 from pathlib import Path
 
-WORKSPACE_ROOT = Path.home() / "agent-workspaces"
+# WORKSPACE_ROOT = Path.home() / "agent-workspaces"
+WORKSPACE_ROOT = Path.home() / "/goinfre/tessaadi/agent-workspaces"
 
 TESTBED_PATH = WORKSPACE_ROOT / "testbed"
 TMP_PATH = WORKSPACE_ROOT / "tmp-agent"
