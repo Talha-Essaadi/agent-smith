@@ -224,24 +224,6 @@ async def async_main() -> None:
         await manager.close()
 
 
-# def main():
-#     try:
-#         asyncio.run(async_main())
-
-
-#     except KeyboardInterrupt:
-#         print("\nInterrupted.")
-#     except Exception as exc:
-#         if _is_connection_error(exc):
-#             print(
-#                 "\n[ERROR] Failed to connect to MCP server.\n"
-#                 "The server may be stopped or unreachable.\n"
-#                 "Check the URL, port, and server status.",
-#                 file=sys.stderr,
-#             )
-#             raise SystemExit(1) from None
-
-#         raise
 
 
 
@@ -264,8 +246,8 @@ def main():
             )
         raise SystemExit(1) from None
 
-    except Exception as exc:
-        print(f"Execution error: {exc}")
+    # except Exception as exc:
+    #     print(f"Execution error: {exc}")
 
 
 if __name__ == "__main__":
