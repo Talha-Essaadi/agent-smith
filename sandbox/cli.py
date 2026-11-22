@@ -5,7 +5,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from aioconsole import ainput, aprint
+from aioconsole import ainput
 
 from sandbox.exceptions import MCPConnectionError
 from sandbox.mcp_manager import MCPManager
@@ -64,9 +64,10 @@ async def connect_mcp(
         if not parts:
             raise ValueError("Empty MCP stdio command")
 
+        command = sys.executable if parts[0] in ("python", "python3") else parts[0]
         await manager.connect_stdio(
             server_name="stdio",
-            command=parts[0],
+            command=command,
             args=parts[1:],
         )
         return True
@@ -111,10 +112,11 @@ async def interactive_loop(
     sandbox: Sandbox,
     manager: MCPManager,
 ) -> None:
-    """Read Python code from the terminal and execute it."""
+    """Execute piped scripts as a whole,
+     or run a REPL on interactive terminals."""
     print(
         "Agent Smith Sandbox "
-        "(type 'exit' or Ctrl+D to quit, ':tools' to list MCP tools)"
+        "(type 'exit' or Ctrl+D to quit, ':manual' to list MCP tools)"
     )
 
     while True:
@@ -130,7 +132,7 @@ async def interactive_loop(
         if command in ("exit", "exit()", ":exit", ":quit"):
             break
 
-        if command == ":tools":
+        if command == ":manual":
             display_tools(manager)
             continue
 
