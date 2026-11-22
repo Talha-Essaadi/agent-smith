@@ -2,6 +2,7 @@ import builtins
 import io
 import json
 import os
+import resource
 import sys
 import traceback
 import types
@@ -48,6 +49,34 @@ class _StreamingWriter(io.TextIOBase):
 
     def getvalue(self) -> str:
         return "".join(self._chunks)
+
+
+def _current_vm_bytes() -> int:
+    """Read current process virtual memory size from /proc/self/status."""
+    try:
+        with _REAL_OPEN("/proc/self/status", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmSize:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1]) * 1024
+    except Exception:
+        pass
+    return 48 * 1024 * 1024
+
+
+def _apply_memory_limit(max_memory_mb: int) -> None:
+    """Enforce RLIMIT_AS so oversized allocations raise catchable MemoryError."""
+    if max_memory_mb <= 0:
+        return
+    try:
+        limit_bytes = _current_vm_bytes() + int(max_memory_mb) * 1024 * 1024
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        if hard != resource.RLIM_INFINITY:
+            limit_bytes = min(limit_bytes, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, hard))
+    except (ValueError, OSError):
+        pass
 
 
 def _is_import_allowed(module: str, authorized_imports: list[str]) -> bool:
@@ -178,6 +207,9 @@ def main() -> None:
     init_msg = json.loads(init_line)
     authorized_imports: list[str] = init_msg.get("authorized_imports", [])
     allowed_directories: list[str] = init_msg.get("allowed_directories", [])
+    max_memory_mb: int = int(init_msg.get("max_memory_mb", 0))
+
+    _apply_memory_limit(max_memory_mb)
 
     user_namespace: dict[str, Any] = {
         "__name__": "__main__",

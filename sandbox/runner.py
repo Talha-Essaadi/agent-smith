@@ -10,7 +10,6 @@ from typing import Any
 import docker
 from docker.errors import DockerException, ImageNotFound
 
-from sandbox.import_guard import ImportGuard
 from schemas.sandbox import ExecutionResult, SandboxConfig
 
 
@@ -62,7 +61,6 @@ class DockerRunner:
         self.mcp_manager = mcp_manager
         self.client = docker.from_env()
         self.image = _SANDBOX_IMAGE
-        self.import_guard = ImportGuard(config.authorized_imports)
 
         self._container = None
         self._connection = None
@@ -265,6 +263,7 @@ class DockerRunner:
                 "type": "init",
                 "authorized_imports": self.config.authorized_imports,
                 "allowed_directories": self.config.allowed_directories,
+                "max_memory_mb": self.config.max_memory_mb,
             })
             ready = self._read_next_message_sync(timeout_seconds=15.0)
             if not ready or ready.get("type") != "ready":
@@ -379,16 +378,6 @@ class DockerRunner:
         """Execute Python code in the persistent sandbox container."""
         safe_tools = tools or []
         discovered_tool_names = {tool.name for tool in safe_tools}
-
-        # 1. Static import and syntax validation before touching the container.
-        try:
-            self.import_guard.validate(code)
-        except ImportError as exc:
-            return ExecutionResult(error=f"ImportError: {exc}")
-        except SyntaxError as exc:
-            return ExecutionResult(
-                error=f"SyntaxError: {exc.msg} (line {exc.lineno})"
-            )
 
         partial_stdout: list[str] = []
         partial_stderr: list[str] = []
