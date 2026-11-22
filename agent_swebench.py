@@ -117,7 +117,8 @@ class SWEBenchCLI:
             task = self._load_task()
 
             docker_manager = SWEBenchDockerManager(task.docker_image)
-            container_id, testbed_dir = await asyncio.to_thread(docker_manager.start)
+            container_id = await asyncio.to_thread(docker_manager.start)
+            testbed_dir = "/testbed"
 
             mcp_env = os.environ.copy()
             mcp_env.update({
@@ -161,7 +162,7 @@ class SWEBenchCLI:
                     env=mcp_env,
                 )
 
-            sandbox = Sandbox(sandbox_config, mcp_manager, task)
+            sandbox = Sandbox(sandbox_config, mcp_manager)
             system_prompt = PromptBuilder.build_swebench_system_prompt(
                 sandbox.get_manual("swebench")
             )

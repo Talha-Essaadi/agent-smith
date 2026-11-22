@@ -93,7 +93,6 @@ class LLMClient:
             reasoning = (message.get("reasoning_content")
                          if message.get("reasoning_content")
                          else message.get("reasoning"))
-            content = reasoning + content
 
         content = raw_content if raw_content.strip() else reasoning
 
