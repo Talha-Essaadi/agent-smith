@@ -1,84 +1,33 @@
-from pathlib import Path
+import ast
 import fnmatch
-import os
-# from sandbox.docker_backend import run_in_container
+from pathlib import Path
 
-# Abdo Debug # This hardcoded root ignores TESTBED_PATH set by the moulinette's isolated tests.
-TESTBED_ROOT = (
-    Path.home() / "agent-workspaces" / "testbed"
-).resolve()
+from swebench_tools.backend import (
+    docker_exec_python,
+    is_docker_mode,
+    resolve_container_path,
+    resolve_local_path,
+    get_testbed_root,
+    truncate_output,
+)
 
-def pwd() -> str:
-    """Return the working directory inside the SWE-bench container."""
-    # return run_in_container(["pwd"])
-    return os.getcwd()
-
-
-
-
-# def _resolve_path(path: str) -> Path:
-#     """
-#     Resolve a path and ensure it stays inside /testbed.
-#     Accepts both relative and absolute paths.
-#     """
-#     candidate = Path(path)
-
-#     if not candidate.is_absolute():
-#         candidate = TESTBED_ROOT / candidate
-
-#     resolved = candidate.resolve()
-
-#     try:
-#         resolved.relative_to(TESTBED_ROOT)
-#     except ValueError:
-#         raise PermissionError(
-#             f"Access denied: '{path}' is outside {TESTBED_ROOT}"
-#         )
-
-#     return resolved
+from .container_scripts import (
+    _CONTAINER_READ_SCRIPT,
+    _CONTAINER_EDIT_SCRIPT,
+    _CONTAINER_LIST_SCRIPT
+)
 
 
-def _resolve_path(directory: str) -> Path:
-    """Resolve a directory inside the shared workspace."""
-
-    requested = Path(directory)
-
-    # Support Docker-style paths such as /testbed/src
-    # Abdo Debug # Search uses /testbed directly, but read_file maps it to a different local root.
-    # Abdo Debug # Absolute paths under a custom TESTBED_PATH are rejected here.
-    if requested.is_absolute():
-        try:
-            requested = requested.relative_to("/testbed")
-        except ValueError:
-            raise ValueError(
-                "Absolute paths must be inside /testbed"
-            ) from None
-
-    path = (TESTBED_ROOT / requested).resolve()
-
-    # Prevent access outside the shared workspace
-    if not path.is_relative_to(TESTBED_ROOT):
-        raise ValueError(
-            f"Access outside shared workspace is forbidden: {directory}"
-        )
-
-    return path
-
-
-
-def read_file(filepath: str, start_line: int, end_line: int) -> str:
-    """
-    Read a specific range of lines from a file.
-
-    Line numbers are 1-based and inclusive.
-    Output includes line numbers, similar to `cat -n`.
-    """
-    # Abdo Debug # This debug print writes to stdout and can corrupt MCP stdio JSON-RPC messages.
-    print(f"*********************{pwd()}")
+def read_file(
+    filepath: str,
+    start_line: int,
+    end_line: int
+) -> str:
+    """Read lines from a file with 1-based line numbers
+     (`<line_number>: <line_content>`)."""
     if start_line < 1:
         raise ValueError("start_line must be >= 1")
-
-    if end_line < start_line:
+    if end_line is not None and end_line < start_line:
         raise ValueError("end_line must be >= start_line")
 
     path = _resolve_path(filepath)
