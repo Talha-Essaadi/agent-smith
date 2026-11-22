@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 from pathlib import Path
 import shlex
 import signal
@@ -15,6 +16,7 @@ from agent import (
     resolve_llm_settings,
 )
 from sandbox import MCPManager, Sandbox
+from sandbox.swebench_docker import SWEBenchDockerManager
 from schemas import SWEBenchTaskInput, SandboxConfig, SolutionOutput
 
 
@@ -114,19 +116,15 @@ class SWEBenchCLI:
             )
             task = self._load_task()
 
-            # Initialize SWEDockerManager and get container and testbed dir
-            # Abdo Debug # This disabled setup never starts the task container or prepares its testbed.
-            # docker_manager = SWEBenchDockerManager(task.docker_image)
-            # container_id, testbed_dir = await asyncio.to_thread(docker_manager.start)
-            # Set environment variables for MCP tools
-            # Abdo Debug # This disabled block leaves the MCP tools without the task's environment settings.
-            # mcp_env = os.environ.copy()
-            # mcp_env.update({
-            #     "TESTBED_PATH": str(testbed_dir),
-            #     "SWE_CONTAINER_ID": container_id,
-            #     "SWE_EVAL_SCRIPT": task.eval_script
-            # })
-            mcp_env = None
+            docker_manager = SWEBenchDockerManager(task.docker_image)
+            container_id, testbed_dir = await asyncio.to_thread(docker_manager.start)
+
+            mcp_env = os.environ.copy()
+            mcp_env.update({
+                "TESTBED_PATH": str(testbed_dir),
+                "SWE_CONTAINER_ID": container_id,
+                "SWE_EVAL_SCRIPT": task.eval_script
+            })
 
             llm_client = LLMClient(
                 model_name=model_name,

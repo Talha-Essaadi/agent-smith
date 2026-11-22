@@ -5,7 +5,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from aioconsole import ainput
+from aioconsole import ainput, aprint
 
 from sandbox.exceptions import MCPConnectionError
 from sandbox.mcp_manager import MCPManager
@@ -121,7 +121,7 @@ async def interactive_loop(
         try:
             code = await ainput("sandbox> ")
         except EOFError:
-            pass
+            break
         except KeyboardInterrupt:
             print("\nInterrupted.")
             break

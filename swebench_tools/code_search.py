@@ -1,221 +1,230 @@
-
 import ast
 import fnmatch
+import os
+import re
 from pathlib import Path
 
+from .backend import (
+    docker_exec_python,
+    get_testbed_root,
+    is_docker_mode,
+    resolve_container_path,
+    resolve_local_path,
+    truncate_output,
+)
 
-# Abdo Debug # This hardcoded root ignores TESTBED_PATH and differs from filesystem.py's root.
-TESTBED_ROOT = Path("/testbed").resolve()
-
-
-def _resolve_path(path: str) -> Path:
-    """Resolve a path and prevent access outside /testbed."""
-    candidate = Path(path)
-
-    if not candidate.is_absolute():
-        candidate = TESTBED_ROOT / candidate
-
-    resolved = candidate.resolve()
-
-    try:
-        resolved.relative_to(TESTBED_ROOT)
-    except ValueError:
-        raise PermissionError(f"Access denied: {path}")
-
-    return resolved
+from .container_scripts import (
+    _CONTAINER_SEARCH_CODE_SCRIPT,
+    _CONTAINER_SEARCH_DEF_SCRIPT,
+    _CONTAINER_FIND_REFS_SCRIPT
+)
 
 
-def _get_python_files(directory: Path):
-    """Return Python files inside a directory, excluding external symlinks."""
-    for filepath in directory.rglob("*.py"):
-        try:
-            resolved = filepath.resolve()
-            resolved.relative_to(TESTBED_ROOT)
-        except (ValueError, OSError):
-            continue
-
-        if filepath.is_file():
-            yield filepath
+_MAX_MATCHES = 200
 
 
-# ---------------------------------------------------------
-# 1. Search source code
-# ---------------------------------------------------------
+def _iter_repo_files(root: Path):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d != ".git")
+        for fname in sorted(filenames):
+            filepath = Path(dirpath) / fname
+            try:
+                filepath.resolve().relative_to(root)
+            except (ValueError, OSError):
+                continue
+            if filepath.is_file():
+                yield filepath
+
 
 def search_code(pattern: str, file_pattern: str = "*") -> str:
-    """
-    Search for a text pattern in repository files.
-
-    Args:
-        pattern: Text to search for.
-        file_pattern: File glob, e.g. '*.py', '*.c', '*.h'.
-
-    Returns:
-        Matching lines in grep-like format.
-    """
+    """Perform a grep-like search in the codebase (`/abs/path:<line> <content>`)."""
     if not pattern:
         raise ValueError("pattern cannot be empty")
 
-    results = []
+    if is_docker_mode():
+        output = docker_exec_python(
+            _CONTAINER_SEARCH_CODE_SCRIPT,
+            {
+                "pattern": pattern,
+                "file_pattern": file_pattern or "*",
+                "max_matches": _MAX_MATCHES,
+            },
+        )
+        return truncate_output(output)
 
-    for filepath in TESTBED_ROOT.rglob("*"):
-        try:
-            filepath.resolve().relative_to(TESTBED_ROOT)
-        except (ValueError, OSError):
+    root = get_testbed_root()
+    glob_pat = file_pattern or "*"
+    try:
+        regex = re.compile(pattern)
+    except re.error:
+        regex = None
+
+    results: list[str] = []
+    truncated = False
+
+    for filepath in _iter_repo_files(root):
+        rel = filepath.relative_to(root).as_posix()
+        if (not fnmatch.fnmatch(filepath.name, glob_pat)
+                and not fnmatch.fnmatch(rel, glob_pat)):
             continue
-
-        if not filepath.is_file():
-            continue
-
-        relative_path = filepath.relative_to(TESTBED_ROOT).as_posix()
-
-        if not fnmatch.fnmatch(filepath.name, file_pattern) and not fnmatch.fnmatch(
-            relative_path, file_pattern
-        ):
-            continue
-
         try:
             content = filepath.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
 
-        for line_number, line in enumerate(content.splitlines(), start=1):
-            if pattern in line:
-                # Abdo Debug # read_file maps this /testbed path to another root and may not find the file.
-                results.append(
-                    f"{filepath}:{line_number} {line}"
-                )
+        for lineno, line in enumerate(content.splitlines(), start=1):
+            matched = (
+                bool(regex.search(line))
+                if regex is not None
+                else (pattern in line)
+            )
+            if matched:
+                results.append(f"{filepath}:{lineno} {line}")
+                if len(results) >= _MAX_MATCHES:
+                    truncated = True
+                    break
+        if truncated:
+            break
 
     if not results:
         return f"No matches found for '{pattern}'."
 
-    return "\n".join(results)
+    output = "\n".join(results)
+    if truncated:
+        output += (
+            f"\n[Output truncated at {_MAX_MATCHES} matches."
+            " Narrow your pattern or file_pattern.]"
+        )
+    return truncate_output(output)
 
-
-# ---------------------------------------------------------
-# 2. Find function or class definitions
-# ---------------------------------------------------------
 
 def search_function_or_class_definition_in_code(name: str) -> str:
-    """
-    Search Python files for function, async function, or class definitions.
-
-    Uses AST rather than text matching, so calls such as foo()
-    are not mistaken for definitions.
-    """
+    """Find function or class definitions by name using AST parsing."""
     if not name:
         raise ValueError("name cannot be empty")
 
-    results = []
+    if is_docker_mode():
+        output = docker_exec_python(
+            _CONTAINER_SEARCH_DEF_SCRIPT,
+            {"name": name}
+        )
+        return truncate_output(output)
 
-    for filepath in _get_python_files(TESTBED_ROOT):
+    root = get_testbed_root()
+    results: list[str] = []
+
+    for filepath in _iter_repo_files(root):
+        if filepath.suffix != ".py":
+            continue
         try:
             source = filepath.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(filepath))
         except (SyntaxError, UnicodeDecodeError, OSError):
             continue
 
+        lines = source.splitlines()
         for node in ast.walk(tree):
-            if isinstance(
-                node,
-                (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            if (
+                isinstance(
+                    node,
+                    (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name == name
             ):
-                if node.name == name:
-                    kind = (
-                        "class" if isinstance(node, ast.ClassDef)
-                        else "function"
-                    )
-
-                    results.append(
-                        f"{filepath}:{node.lineno} "
-                        f"{kind} {node.name}"
-                    )
+                line_text = (
+                    lines[node.lineno - 1].strip()
+                    if node.lineno <= len(lines)
+                    else name
+                )
+                results.append(f"{filepath}:{node.lineno} {line_text}")
 
     if not results:
         return f"No definition found for '{name}'."
+    return truncate_output("\n".join(results))
 
-    return "\n".join(results)
 
-
-# ---------------------------------------------------------
-# 3. Find symbol references
-# ---------------------------------------------------------
-
-def find_references(name: str, filepath: str, line: int) -> str:
-    """
-    Find references to a Python symbol throughout the repository.
-
-    Args:
-        name: Symbol name, e.g. 'execute_task'.
-        filepath: File containing the symbol's definition.
-        line: Definition's starting line.
-
-    Returns:
-        Matching source lines, excluding the definition itself.
-    """
+def find_references(name: str, filepath: str = "", line: int = 0) -> str:
+    """Find all usages of a Python symbol across the repository."""
     if not name or not name.isidentifier():
         raise ValueError("name must be a valid Python identifier")
+    if filepath and line < 1:
+        raise ValueError("line must be >= 1 when filepath is provided")
 
-    if line < 1:
-        raise ValueError("line must be >= 1")
+    if is_docker_mode():
+        target = resolve_container_path(filepath) if filepath else ""
+        output = docker_exec_python(
+            _CONTAINER_FIND_REFS_SCRIPT,
+            {
+                "name": name,
+                "filepath": target,
+                "line": line,
+                "max_matches": _MAX_MATCHES,
+            },
+        )
+        return truncate_output(output)
 
-    definition_path = _resolve_path(filepath)
+    root = get_testbed_root()
+    definition_path: Path | None = None
+    if filepath:
+        definition_path = resolve_local_path(filepath)
+        if not definition_path.is_file():
+            raise FileNotFoundError(f"File not found: {filepath}")
 
-    if not definition_path.is_file():
-        raise FileNotFoundError(f"File not found: {filepath}")
+    results: list[str] = []
+    seen: set[str] = set()
+    truncated = False
 
-    results = []
-
-    for current_file in _get_python_files(TESTBED_ROOT):
+    for current_file in _iter_repo_files(root):
+        if current_file.suffix != ".py":
+            continue
         try:
             source = current_file.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(current_file))
         except (SyntaxError, UnicodeDecodeError, OSError):
             continue
 
-        source_lines = source.splitlines()
+        lines = source.splitlines()
+        resolved_current = current_file.resolve()
 
         for node in ast.walk(tree):
             matches = False
-
-            # Example: execute_task()
             if isinstance(node, ast.Name) and node.id == name:
                 matches = True
-
-            # Example: agent.execute_task()
             elif isinstance(node, ast.Attribute) and node.attr == name:
                 matches = True
-
-            # Example: from module import execute_task
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
-                    if alias.name == name:
+                    if alias.name == name or alias.asname == name:
                         matches = True
-                    elif alias.asname == name:
-                        matches = True
+                        break
 
             if not matches:
                 continue
 
-            node_line = getattr(node, "lineno", None)
-
-            if node_line is None:
+            lineno = getattr(node, "lineno", None)
+            if lineno is None:
                 continue
-
-            # Ignore the original definition location.
             if (
-                current_file.resolve() == definition_path
-                and node_line == line
+                definition_path is not None
+                and resolved_current == definition_path
+                and lineno == line
             ):
                 continue
 
-            if node_line <= len(source_lines):
-                results.append(
-                    f"{current_file}:{node_line} "
-                    f"{source_lines[node_line - 1].strip()}"
-                )
+            if lineno <= len(lines):
+                entry = f"{current_file}:{lineno} {lines[lineno - 1].strip()}"
+                if entry not in seen:
+                    seen.add(entry)
+                    results.append(entry)
+                    if len(results) >= _MAX_MATCHES:
+                        truncated = True
+                        break
+        if truncated:
+            break
 
     if not results:
         return f"No references found for '{name}'."
 
-    return "\n".join(sorted(set(results)))
+    output = "\n".join(results)
+    if truncated:
+        output += f"\n[Output truncated at {_MAX_MATCHES} references.]"
+    return truncate_output(output)
