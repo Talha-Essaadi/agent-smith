@@ -106,17 +106,6 @@ class DockerRunner:
         print("Image built successfully.")
 
 
-        try:
-            init.start()
-            result = init.wait(timeout=10)
-
-            if result["StatusCode"] != 0:
-                raise RuntimeError(
-                    "Failed to initialize sandbox volume permissions"
-                )
-        finally:
-            init.remove(force=True)
-
     def _handle_execution_timeout(self, container) -> ExecutionResult:
         """Stop an execution that exceeded its configured wall-clock deadline."""
         try:
