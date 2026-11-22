@@ -3,6 +3,7 @@ import asyncio
 import json
 import shlex
 import sys
+import os
 from pathlib import Path
 
 from aioconsole import ainput, aprint
@@ -69,6 +70,11 @@ async def connect_mcp(
             server_name="stdio",
             command=command,
             args=parts[1:],
+            env={
+                key: os.environ[key]
+                for key in ("TESTBED_PATH", "SWE_CONTAINER_ID")
+                if key in os.environ
+            },
         )
         return True
 
@@ -133,10 +139,10 @@ async def interactive_loop(
             break
 
         command = code.strip()
-        if command in ("exit", "exit()", ":exit", ":quit"):
+        if interactive and command in ("exit", "exit()", ":exit", ":quit"):
             break
 
-        if command == ":tools":
+        if interactive and command == ":tools":
             display_tools(manager)
             continue
 
@@ -202,7 +208,7 @@ async def async_main() -> None:
 
     try:
         connected = await connect_mcp(manager, args)
-        if connected:
+        if connected and sys.stdin.isatty():
             display_tools(manager)
 
         await interactive_loop(runner, manager)
