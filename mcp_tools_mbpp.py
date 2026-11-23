@@ -6,7 +6,7 @@ import sys
 from mcp.server.fastmcp import FastMCP
 
 
-mcp = FastMCP("mbpp")
+mcp = FastMCP("mbpp", log_level="WARNING")
 
 
 @mcp.tool()

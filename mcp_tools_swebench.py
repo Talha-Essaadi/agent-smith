@@ -16,7 +16,7 @@ from swebench_tools import (
 )
 
 
-mcp = FastMCP("swebench")
+mcp = FastMCP("swebench", log_level="WARNING")
 
 # File system tools
 mcp.tool()(read_file)
