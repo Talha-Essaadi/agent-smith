@@ -305,10 +305,22 @@ if def_path is not None:
     try:
         def_path.relative_to(root)
     except ValueError:
-        print(json.dumps({"ok": False, "error_type": "PermissionError", "error": f"Access denied: {req['filepath']}"}))
+        print(json.dumps(
+            {
+                "ok": False,
+                "error_type": "PermissionError",
+                "error": f"Access denied: {req['filepath']}"
+            }
+        ))
         sys.exit(0)
     if not def_path.is_file():
-        print(json.dumps({"ok": False, "error_type": "FileNotFoundError", "error": f"File not found: {req['filepath']}"}))
+        print(json.dumps(
+            {
+                "ok": False,
+                "error_type": "FileNotFoundError",
+                "error": f"File not found: {req['filepath']}"
+            }
+        ))
         sys.exit(0)
 
 results = []
@@ -345,7 +357,11 @@ for dirpath, dirnames, filenames in os.walk(root):
             lineno = getattr(node, "lineno", None)
             if lineno is None:
                 continue
-            if def_path is not None and resolved == def_path and lineno == def_line:
+            if (
+                def_path is not None
+                and resolved == def_path
+                and lineno == def_line
+            ):
                 continue
             if lineno <= len(lines):
                 entry = f"{filepath}:{lineno} {lines[lineno - 1].strip()}"

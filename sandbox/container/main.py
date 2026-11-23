@@ -25,7 +25,8 @@ from restrictions import (
 
 
 class _StreamingWriter(io.TextIOBase):
-    """Captures output locally and streams chunks to host for partial timeout output."""
+    """Captures output locally and streams
+     chunks to host for partial timeout output."""
 
     def __init__(self, stream_name: str, bridge: IPCBridge) -> None:
         self._stream_name = stream_name
@@ -66,7 +67,8 @@ def _current_vm_bytes() -> int:
 
 
 def _apply_memory_limit(max_memory_mb: int) -> None:
-    """Enforce RLIMIT_AS so oversized allocations raise catchable MemoryError."""
+    """Enforce RLIMIT_AS so oversized
+     allocations raise catchable MemoryError."""
     if max_memory_mb <= 0:
         return
     try:
@@ -112,7 +114,9 @@ def _make_safe_import(authorized_imports: list[str]):
                     continue
                 attr = _REAL_GETATTR(module, item, None)
                 if isinstance(attr, types.ModuleType):
-                    sub_name = _REAL_GETATTR(attr, "__name__", f"{name}.{item}")
+                    sub_name = _REAL_GETATTR(
+                        attr, "__name__", f"{name}.{item}"
+                    )
                     if not _is_import_allowed(sub_name, authorized_imports):
                         raise ImportError(f"Unauthorized import: {sub_name}")
 
@@ -126,7 +130,9 @@ def _make_safe_open(allowed_directories: list[str]):
 
     def _safe_open(file: Any, *args: Any, **kwargs: Any) -> Any:
         if isinstance(file, int):
-            raise PermissionError("Opening raw file descriptors is not allowed")
+            raise PermissionError(
+                "Opening raw file descriptors is not allowed"
+            )
 
         raw_path = os.fspath(file)
         if isinstance(raw_path, bytes):
@@ -165,7 +171,9 @@ def _safe_getattr(obj: Any, name: str, *default: Any) -> Any:
 
 def _safe_setattr(obj: Any, name: str, value: Any) -> None:
     if isinstance(name, str) and name in _BLOCKED_ATTRS:
-        raise PermissionError(f"Modification of attribute '{name}' is restricted")
+        raise PermissionError(
+            f"Modification of attribute '{name}' is restricted"
+        )
     _REAL_SETATTR(obj, name, value)
 
 
@@ -245,7 +253,9 @@ def main() -> None:
         tools = message.get("tools", [])
 
         # Refresh MCP tool wrappers while preserving user variables.
-        new_wrappers = create_tool_namespace(tools=tools, call_tool=bridge.call_tool)
+        new_wrappers = create_tool_namespace(
+            tools=tools, call_tool=bridge.call_tool
+        )
         for old_name in registered_tool_names - set(new_wrappers.keys()):
             user_namespace.pop(old_name, None)
         user_namespace.update(new_wrappers)
@@ -268,7 +278,10 @@ def main() -> None:
         }
 
         try:
-            with redirect_stdout(stdout_writer), redirect_stderr(stderr_writer):
+            with (
+                redirect_stdout(stdout_writer),
+                redirect_stderr(stderr_writer)
+            ):
                 compiled = compile(code, "<sandbox>", "exec")
                 exec(compiled, user_namespace)
         except FinalAnswerSignal as exc:

@@ -1,6 +1,5 @@
 import ast
 import fnmatch
-from pathlib import Path
 
 from .backend import (
     docker_exec_python,
@@ -23,7 +22,8 @@ def read_file(
     start_line: int = 1,
     end_line: int | None = None,
 ) -> str:
-    """Read lines from a file with 1-based line numbers (`<line_number>: <line_content>`)."""
+    """Read lines from a file with 1-based line numbers
+     (`<line_number>: <line_content>`)."""
     if start_line < 1:
         raise ValueError("start_line must be >= 1")
     if end_line is not None and end_line < start_line:
@@ -33,7 +33,11 @@ def read_file(
         target = resolve_container_path(filepath)
         output = docker_exec_python(
             _CONTAINER_READ_SCRIPT,
-            {"filepath": target, "start_line": start_line, "end_line": end_line},
+            {
+                "filepath": target,
+                "start_line": start_line,
+                "end_line": end_line
+            },
         )
         return truncate_output(output)
 
@@ -46,7 +50,10 @@ def read_file(
         return f"File contains only {len(lines)} lines."
 
     actual_end = len(lines) if end_line is None else min(end_line, len(lines))
-    formatted = [f"{ln}: {lines[ln - 1]}" for ln in range(start_line, actual_end + 1)]
+    formatted = [
+        f"{ln}: {lines[ln - 1]}"
+        for ln in range(start_line, actual_end + 1)
+    ]
     return truncate_output("\n".join(formatted))
 
 
@@ -77,7 +84,8 @@ def edit_file(filepath: str, old_str: str, new_str: str) -> str:
         raise ValueError("old_str was not found in the file")
     if occurrences > 1:
         raise ValueError(
-            f"old_str appears {occurrences} times. Provide a more specific string."
+            f"old_str appears {occurrences} times."
+            " Provide a more specific string."
         )
 
     updated = content.replace(old_str, new_str, 1)
@@ -88,7 +96,10 @@ def edit_file(filepath: str, old_str: str, new_str: str) -> str:
         try:
             ast.parse(updated, filename=str(path))
         except SyntaxError as exc:
-            msg += f"\n[WARNING: SyntaxError introduced at line {exc.lineno}: {exc.msg}]"
+            msg += (
+                f"\n[WARNING: SyntaxError introduced at line"
+                f" {exc.lineno}: {exc.msg}]"
+            )
     return msg
 
 
@@ -98,7 +109,11 @@ def list_files(directory: str = ".", pattern: str = "*") -> str:
         target = resolve_container_path(directory)
         output = docker_exec_python(
             _CONTAINER_LIST_SCRIPT,
-            {"directory": target, "display_dir": directory, "pattern": pattern or "*"},
+            {
+                "directory": target,
+                "display_dir": directory,
+                "pattern": pattern or "*"
+            },
         )
         return truncate_output(output)
 
@@ -123,7 +138,10 @@ def list_files(directory: str = ".", pattern: str = "*") -> str:
             continue
 
         rel_dir = item.relative_to(base).as_posix()
-        if fnmatch.fnmatch(item.name, glob_pat) or fnmatch.fnmatch(rel_dir, glob_pat):
+        if (
+            fnmatch.fnmatch(item.name, glob_pat)
+            or fnmatch.fnmatch(rel_dir, glob_pat)
+        ):
             results.append(item.relative_to(root).as_posix())
 
     if not results:

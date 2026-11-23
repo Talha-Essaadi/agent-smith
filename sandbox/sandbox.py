@@ -52,7 +52,11 @@ def _format_tool_signature(name: str, input_schema: dict[str, Any]) -> str:
 
 
 def _summarize_description(description: str) -> str:
-    lines = [line.strip() for line in description.strip().splitlines() if line.strip()]
+    lines = [
+        line.strip()
+        for line in description.strip().splitlines()
+        if line.strip()
+    ]
     if not lines:
         return "No description provided."
     return lines[0]
@@ -74,7 +78,7 @@ class Sandbox(BaseSandbox):
         tools = self.mcp_manager.list_tools()
         return await self._runner.run(code, tools)
 
-    def get_manual(self, type: str) -> str:
+    def get_manual(self, type: str | None = None) -> str:
         """Dynamically generate a concise manual
          of sandbox limits and MCP capabilities."""
         if type is None or type not in ("mbpp", "swebench"):

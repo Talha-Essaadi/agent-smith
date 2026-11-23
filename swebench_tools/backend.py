@@ -10,7 +10,8 @@ MAX_OUTPUT_CHARS = 50_000
 
 
 def is_docker_mode() -> bool:
-    """Return True when tools should execute inside a SWE-bench Docker container."""
+    """Return True when tools should
+     execute inside a SWE-bench Docker container."""
     return bool(os.environ.get("SWE_CONTAINER_ID", "").strip())
 
 
@@ -45,12 +46,13 @@ def resolve_local_path(raw_path: str) -> Path:
         except ValueError:
             pass
 
-        # Support Docker-style /testbed/... paths when TESTBED_PATH is elsewhere.
+        # Support Docker-style /testbed/... paths
+        # when TESTBED_PATH is elsewhere.
         posix_norm = posixpath.normpath(raw_path)
         if posix_norm == "/testbed":
             return root
         if posix_norm.startswith("/testbed/"):
-            rel = posix_norm[len("/testbed/") :]
+            rel = posix_norm[len("/testbed/"):]
             resolved = (root / rel).resolve()
             try:
                 resolved.relative_to(root)
@@ -64,7 +66,9 @@ def resolve_local_path(raw_path: str) -> Path:
     try:
         resolved.relative_to(root)
     except ValueError:
-        raise PermissionError(f"Access denied: '{raw_path}' is outside {root}") from None
+        raise PermissionError(
+            f"Access denied: '{raw_path}' is outside {root}"
+        ) from None
     return resolved
 
 
@@ -77,12 +81,15 @@ def resolve_container_path(raw_path: str) -> str:
         norm = posixpath.normpath(posixpath.join("/testbed", raw))
 
     if norm != "/testbed" and not norm.startswith("/testbed/"):
-        raise PermissionError(f"Access denied: '{raw_path}' is outside /testbed")
+        raise PermissionError(
+            f"Access denied: '{raw_path}' is outside /testbed"
+        )
     return norm
 
 
 def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> str:
-    """Truncate long output while preserving both head and tail (e.g. pytest summary)."""
+    """Truncate long output while preserving
+     both head and tail (e.g. pytest summary)."""
     if len(text) <= max_chars:
         return text
     head_len = max_chars // 3
@@ -90,7 +97,8 @@ def truncate_output(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> str:
     omitted = len(text) - max_chars
     return (
         f"{text[:head_len]}"
-        f"\n\n[Output truncated: {omitted} characters omitted due to size limits. "
+        f"\n\n[Output truncated: {omitted} "
+        "characters omitted due to size limits. "
         f"Use more specific queries or smaller ranges.]\n\n"
         f"{text[-tail_len:]}"
     )
@@ -101,7 +109,8 @@ def docker_exec_python(
     payload: dict[str, Any],
     timeout: int = 30,
 ) -> Any:
-    """Execute a stdlib Python snippet inside the SWE-bench container via JSON stdin."""
+    """Execute a stdlib Python snippet
+     inside the SWE-bench container via JSON stdin."""
     cid = get_container_id()
     launcher = (
         'PY=$([ -x /opt/miniconda3/envs/testbed/bin/python ] '
@@ -112,7 +121,10 @@ def docker_exec_python(
 
     try:
         proc = subprocess.run(
-            ["docker", "exec", "-i", "-w", "/testbed", cid, "bash", "-c", launcher, "_", script],
+            [
+                "docker", "exec", "-i", "-w", "/testbed",
+                cid, "bash", "-c", launcher, "_", script
+            ],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
@@ -120,13 +132,16 @@ def docker_exec_python(
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise TimeoutError(f"Container tool operation timed out after {timeout}s") from exc
+        raise TimeoutError(
+            f"Container tool operation timed out after {timeout}s"
+        ) from exc
 
     stdout = (proc.stdout or "").strip()
     if not stdout:
         stderr = (proc.stderr or "").strip()
         raise RuntimeError(
-            f"Container tool failed (exit {proc.returncode}): {stderr or 'no output'}"
+            f"Container tool failed (exit {proc.returncode}):"
+            f" {stderr or 'no output'}"
         )
 
     try:
@@ -156,7 +171,8 @@ def run_shell(
     timeout: int = 120,
     script_stdin: str | None = None,
 ) -> tuple[str, str, int, bool]:
-    """Run a bash command either locally in TESTBED_PATH or inside the Docker container.
+    """Run a bash command either locally in
+     TESTBED_PATH or inside the Docker container.
 
     Returns:
         (stdout, stderr, exit_code, timed_out)
@@ -166,7 +182,8 @@ def run_shell(
         cwd = resolve_container_path(workdir)
         conda_prefix = (
             'if [ -d /opt/miniconda3/envs/testbed/bin ]; then '
-            'export PATH="/opt/miniconda3/envs/testbed/bin:/opt/miniconda3/bin:$PATH"; '
+            'export PATH="/opt/miniconda3/envs/testbed/bin:'
+            '/opt/miniconda3/bin:$PATH"; '
             'fi; '
         )
 
@@ -174,19 +191,25 @@ def run_shell(
             runner_cmd = (
                 f"{conda_prefix}"
                 f"if command -v timeout >/dev/null 2>&1; then "
-                f"timeout -k 5 {int(timeout)} bash; "
+                f"timeout -k 5 {timeout} bash; "
                 f"else bash; fi"
             )
-            cmd = ["docker", "exec", "-i", "-w", cwd, cid, "bash", "-c", runner_cmd]
+            cmd = [
+                "docker", "exec", "-i", "-w",
+                cwd, cid, "bash", "-c", runner_cmd
+            ]
             stdin_data = script_stdin
         else:
             runner_cmd = (
                 f"{conda_prefix}"
                 f"if command -v timeout >/dev/null 2>&1; then "
-                f'timeout -k 5 {int(timeout)} bash -c "$1"; '
+                f'timeout -k 5 {timeout} bash -c "$1"; '
                 f'else bash -c "$1"; fi'
             )
-            cmd = ["docker", "exec", "-w", cwd, cid, "bash", "-c", runner_cmd, "_", command]
+            cmd = [
+                "docker", "exec", "-w", cwd, cid,
+                "bash", "-c", runner_cmd, "_", command
+            ]
             stdin_data = None
 
         try:
@@ -199,10 +222,23 @@ def run_shell(
                 check=False,
             )
             timed_out = proc.returncode == 124
-            return proc.stdout or "", proc.stderr or "", proc.returncode, timed_out
+            return (
+                proc.stdout or "",
+                proc.stderr or "",
+                proc.returncode,
+                timed_out
+            )
         except subprocess.TimeoutExpired as exc:
-            out = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            err = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            out = (
+                exc.stdout.decode("utf-8", errors="replace")
+                if isinstance(exc.stdout, bytes)
+                else (exc.stdout or "")
+            )
+            err = (
+                exc.stderr.decode("utf-8", errors="replace")
+                if isinstance(exc.stderr, bytes)
+                else (exc.stderr or "")
+            )
             return out, err, 124, True
 
     # Local / moulinette isolated mode
@@ -223,6 +259,14 @@ def run_shell(
         )
         return proc.stdout or "", proc.stderr or "", proc.returncode, False
     except subprocess.TimeoutExpired as exc:
-        out = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        err = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        out = (
+            exc.stdout.decode("utf-8", errors="replace")
+            if isinstance(exc.stdout, bytes)
+            else (exc.stdout or "")
+        )
+        err = (
+            exc.stderr.decode("utf-8", errors="replace")
+            if isinstance(exc.stderr, bytes)
+            else (exc.stderr or "")
+        )
         return out, err, 124, True

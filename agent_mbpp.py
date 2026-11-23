@@ -136,7 +136,9 @@ class MBPPCLI:
                     url=self.args.mcp_server,
                 )
             else:
-                mcp_script = Path(__file__).resolve().parent / "mcp_tools_mbpp.py"
+                mcp_script = (
+                    Path(__file__).resolve().parent / "mcp_tools_mbpp.py"
+                )
                 await manager.connect_stdio(
                     server_name="mbpp",
                     command=sys.executable,
@@ -209,7 +211,7 @@ class MBPPCLI:
                         pass
 
 
-def main():
+def main() -> None:
     cli = MBPPCLI()
     asyncio.run(cli.run())
 

@@ -9,8 +9,6 @@ class SandboxConfigurationError(SandboxError):
     """Raised when the sandbox configuration is invalid."""
 
 
-
-
 class SandboxExecutionError(SandboxError):
     """Raised when code execution fails unexpectedly."""
 
@@ -21,8 +19,6 @@ class SandboxTimeoutError(SandboxExecutionError):
 
 class SandboxResourceLimitError(SandboxExecutionError):
     """Raised when execution exceeds a resource limit, such as memory."""
-
-
 
 
 class SandboxImportError(SandboxError):

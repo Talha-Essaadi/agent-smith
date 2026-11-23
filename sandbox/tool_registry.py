@@ -1,3 +1,4 @@
+from typing import Dict
 from dataclasses import dataclass
 from mcp.types import Tool
 
@@ -8,7 +9,7 @@ class RegisteredTool:
     server_name: str
     original_name: str
     description: str
-    inputSchema: dict
+    inputSchema: Dict
 
 
 class ToolRegistry:

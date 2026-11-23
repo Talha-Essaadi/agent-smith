@@ -89,7 +89,9 @@ _GENERIC_WARNING = (
     " explicitly.]"
 )
 
-_MSG_EMPTY = "No valid code block was found in your response (response was empty)"
+_MSG_EMPTY = (
+    "No valid code block was found in your response (response was empty)"
+)
 
 _MSG_UNKNOWN = (
     "No recognisable code block was found in your response. It did not"

@@ -65,7 +65,11 @@ async def connect_mcp(
         if not parts:
             raise ValueError("Empty MCP stdio command")
 
-        command = sys.executable if parts[0] in ("python", "python3") else parts[0]
+        command = (
+            sys.executable
+            if parts[0] in ("python", "python3")
+            else parts[0]
+        )
         await manager.connect_stdio(
             server_name="stdio",
             command=command,

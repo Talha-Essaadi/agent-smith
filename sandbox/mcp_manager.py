@@ -1,3 +1,5 @@
+from sandbox.tool_registry import RegisteredTool
+from typing_extensions import List
 from typing import Any
 
 import httpx
@@ -65,7 +67,6 @@ class MCPManager:
             finally:
                 raise
 
-
     async def connect_http(
         self,
         server_name: str,
@@ -115,7 +116,7 @@ class MCPManager:
             arguments=arguments or {},
         )
 
-    def list_tools(self):
+    def list_tools(self) -> List[RegisteredTool]:
         """Return all registered MCP tools."""
         return self.registry.list_tools()
 

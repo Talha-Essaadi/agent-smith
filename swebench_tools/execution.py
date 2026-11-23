@@ -16,7 +16,9 @@ def _format_command_output(
 ) -> str:
     parts = [f"Exit code: {exit_code}"]
     if timed_out:
-        parts.append("[WARNING: Command timed out; output below may be partial.]")
+        parts.append(
+            "[WARNING: Command timed out; output below may be partial.]"
+        )
     if stdout:
         parts.append(f"STDOUT:\n{stdout.rstrip()}")
     if stderr:
@@ -43,7 +45,8 @@ def run_command(command: str, workdir: str = "/testbed") -> str:
 
 
 def run_tests() -> str:
-    """Execute the SWE-bench evaluation script (or fallback pytest in isolated mode)."""
+    """Execute the SWE-bench evaluation script
+     (or fallback pytest in isolated mode)."""
     eval_script = os.environ.get("SWE_EVAL_SCRIPT", "").strip()
     if eval_script:
         stdout, stderr, exit_code, timed_out = run_shell(
@@ -52,9 +55,15 @@ def run_tests() -> str:
             timeout=_TESTS_TIMEOUT_SECONDS,
             script_stdin=eval_script,
         )
-        return _format_command_output(stdout, stderr, exit_code, timed_out)
+        return _format_command_output(
+            stdout, stderr, exit_code, timed_out
+        )
 
-    default_cmd = "pytest -q" if is_docker_mode() else f'"{sys.executable}" -m pytest -q'
+    default_cmd = (
+        "pytest -q"
+        if is_docker_mode()
+        else f'"{sys.executable}" -m pytest -q'
+    )
     test_cmd = os.environ.get("SWEBENCH_TEST_COMMAND", default_cmd)
     stdout, stderr, exit_code, timed_out = run_shell(
         command=test_cmd,
@@ -74,5 +83,7 @@ def get_patch() -> str:
     if timed_out:
         raise RuntimeError("git diff timed out")
     if exit_code != 0:
-        raise RuntimeError(f"git diff failed (exit {exit_code}): {stderr.strip()}")
+        raise RuntimeError(
+            f"git diff failed (exit {exit_code}): {stderr.strip()}"
+        )
     return stdout

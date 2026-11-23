@@ -1,0 +1,13 @@
+[flake8]
+exclude =
+    .venv,
+    .mypy_cache,
+    .codex
+    .aws
+    .agents
+    .pytest_cache
+    exams
+    moulinette
+    tests
+    test.py
+    chat.py

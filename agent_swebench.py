@@ -154,7 +154,9 @@ class SWEBenchCLI:
                     url=self.args.mcp_server,
                 )
             else:
-                mcp_script = Path(__file__).resolve().parent / "mcp_tools_swebench.py"
+                mcp_script = (
+                    Path(__file__).resolve().parent / "mcp_tools_swebench.py"
+                )
                 await mcp_manager.connect_stdio(
                     server_name="swebench",
                     command=sys.executable,
@@ -170,13 +172,13 @@ class SWEBenchCLI:
 
             orchestrator = AgentOrchestrator(llm_client, sandbox, limits)
             solution_output = await orchestrator.run(
-                task_id=str(task.instance_id),
+                task_id=task.instance_id,
                 benchmark="swebench",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
         except asyncio.CancelledError:
-            task_id = str(task.instance_id) if task else "unknown"
+            task_id = task.instance_id if task else "unknown"
             solution_output = SolutionOutput(
                 task_id=task_id,
                 benchmark="swebench",
@@ -192,7 +194,7 @@ class SWEBenchCLI:
             )
         except Exception as e:
             # Build a minimal failure output so we always produce valid JSON
-            task_id = str(task.instance_id) if task else "unknown"
+            task_id = task.instance_id if task else "unknown"
             solution_output = SolutionOutput(
                 task_id=task_id,
                 benchmark="swebench",
@@ -232,7 +234,7 @@ class SWEBenchCLI:
                         pass
 
 
-def main():
+def main() -> None:
     cli = SWEBenchCLI()
     asyncio.run(cli.run())
 

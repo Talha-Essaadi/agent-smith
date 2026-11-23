@@ -37,7 +37,8 @@ def _iter_repo_files(root: Path):
 
 
 def search_code(pattern: str, file_pattern: str = "*") -> str:
-    """Perform a grep-like search in the codebase (`/abs/path:<line> <content>`)."""
+    """Perform a grep-like search in
+     the codebase (`/abs/path:<line> <content>`)."""
     if not pattern:
         raise ValueError("pattern cannot be empty")
 

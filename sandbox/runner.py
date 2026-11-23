@@ -24,7 +24,7 @@ def _extract_frames(buffer: bytearray) -> list[tuple[int, bytes]]:
         length = int.from_bytes(buffer[4:8], "big")
         if len(buffer) < 8 + length:
             break
-        payload = bytes(buffer[8 : 8 + length])
+        payload = bytes(buffer[8: 8 + length])
         del buffer[: 8 + length]
         frames.append((stream_id, payload))
     return frames
@@ -50,7 +50,8 @@ def _truncate_streams(
 
 
 class DockerRunner:
-    """Manages a persistent, locked-down Docker container for sandboxed Python."""
+    """Manages a persistent, locked-down
+     Docker container for sandboxed Python."""
 
     def __init__(
         self,
@@ -116,7 +117,7 @@ class DockerRunner:
                 continue
             roots.append(path)
 
-        size_mb = max(16, int(self.config.max_disk_usage_mb))
+        size_mb = max(16, self.config.max_disk_usage_mb)
         mount_opts = f"rw,noexec,nosuid,size={size_mb}m,mode=1777"
         return {path: mount_opts for path in roots}
 
@@ -186,7 +187,8 @@ class DockerRunner:
         self,
         timeout_seconds: float,
     ) -> dict[str, Any] | None:
-        """Read one JSON IPC message from container stdout; returns None on EOF."""
+        """Read one JSON IPC message from container stdout;
+         returns None on EOF."""
         if self._connection is None:
             return None
         sock = self._connection._sock
@@ -247,7 +249,9 @@ class DockerRunner:
                 pass
             self._destroy_container()
 
-        container = self.client.containers.create(**self._build_container_config())
+        container = self.client.containers.create(
+            **self._build_container_config()
+        )
         connection = container.attach_socket(
             params={"stdin": 1, "stdout": 1, "stream": 1}
         )
@@ -302,7 +306,9 @@ class DockerRunner:
                 ]
                 combined = "\n".join(texts)
                 if result.isError:
-                    raise RuntimeError(combined or "MCP tool reported an error")
+                    raise RuntimeError(
+                        combined or "MCP tool reported an error"
+                    )
                 return {
                     "type": "tool_result",
                     "id": req_id,
@@ -349,7 +355,9 @@ class DockerRunner:
                 messages = [
                     {
                         "role": msg.role,
-                        "content": getattr(msg.content, "text", str(msg.content)),
+                        "content": getattr(
+                            msg.content, "text", str(msg.content)
+                        ),
                     }
                     for msg in res.messages
                 ]
@@ -398,7 +406,8 @@ class DockerRunner:
                 {"type": "exec", "code": code, "tools": discovered_tools},
             )
 
-            # Budget applies ONLY to sandboxed Python code, NOT external MCP calls.
+            # Budget applies ONLY to sandboxed Python code,
+            # NOT external MCP calls.
             remaining_budget = float(self.config.max_execution_time_seconds)
 
             while True:
@@ -460,7 +469,8 @@ class DockerRunner:
                     "mcp_list_prompts",
                     "mcp_get_prompt",
                 ):
-                    # Sandbox execution timer is paused during external MCP call.
+                    # Sandbox execution timer is paused
+                    # during external MCP call.
                     response = await asyncio.wait_for(
                         self._dispatch_mcp_request(msg, discovered_tool_names),
                         timeout=_MCP_CALL_SAFETY_TIMEOUT_SECONDS,

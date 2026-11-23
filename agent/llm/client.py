@@ -180,7 +180,8 @@ class LLMClient:
                     if not parsed.content.strip():
                         finish_reason = choices[0].get("finish_reason")
                         last_error = (
-                            f"Empty LLM response; finish_reason={finish_reason!r}"
+                            f"Empty LLM response; "
+                            f"finish_reason={finish_reason!r}"
                         )
                         time.sleep(backoff)
                         continue

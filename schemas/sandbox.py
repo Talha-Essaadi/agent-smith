@@ -29,7 +29,7 @@ class SandboxConfig(BaseModel):
         ]
     )
     max_execution_time_seconds: int = Field(default=30, gt=0)
-    max_memory_mb: int = Field(default=512, gt=6) # Must be more than 6MB
+    max_memory_mb: int = Field(default=512, gt=6)  # Must be more than 6MB
     max_output_bytes: int = Field(default=100 * 1024, gt=0)  # 100 KB
     max_disk_usage_mb: int = Field(default=100, gt=0)
     # CPU restrictions
@@ -38,7 +38,9 @@ class SandboxConfig(BaseModel):
     max_processes: int = Field(default=64, gt=0)
 
     @classmethod
-    def load_config(cls, config: dict | str | Path | None = None) -> "SandboxConfig":
+    def load_config(
+        cls, config: dict | str | Path | None = None
+    ) -> "SandboxConfig":
         if config is None:
             return cls()
 
@@ -49,7 +51,9 @@ class SandboxConfig(BaseModel):
             with open(config, "r", encoding="utf-8") as file:
                 return cls.model_validate_json(file.read())
 
-        raise TypeError("Config must be a dictionary, JSON file path, or None.")
+        raise TypeError(
+            "Config must be a dictionary, JSON file path, or None."
+        )
 
 
 class ExecutionResult(BaseModel):
@@ -88,7 +92,8 @@ class ExecutionResult(BaseModel):
         if not parts and not self.is_final_answer:
             return (
                 "[Execution completed successfully with no output. "
-                "Remember to use print() to inspect variables or tool results.]"
+                "Remember to use print() to inspect variables "
+                "or tool results.]"
             )
         return "\n\n".join(parts)
 

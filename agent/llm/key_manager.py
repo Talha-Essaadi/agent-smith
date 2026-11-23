@@ -7,7 +7,9 @@ from urllib.parse import urlsplit
 from dotenv import dotenv_values
 
 
-_API_KEY_NAME = re.compile(r"(?:[A-Z0-9_]+_)?API_KEY(?:S|_?\d+)?", re.IGNORECASE)
+_API_KEY_NAME = re.compile(
+    r"(?:[A-Z0-9_]+_)?API_KEY(?:S|_?\d+)?", re.IGNORECASE
+)
 
 
 class KeyManager:
@@ -46,9 +48,13 @@ class KeyManager:
             keys = self._read_keys(dotenv_values(path))
         else:
             # Exam scripts export keys before invoking the agent.
-            keys = self._read_keys(os.environ) or self._read_keys(dotenv_values())
+            keys = (
+                self._read_keys(os.environ) or self._read_keys(dotenv_values())
+            )
         if not keys:
-            raise ValueError("No API keys are set up for the selected provider.")
+            raise ValueError(
+                "No API keys are set up for the selected provider."
+            )
         return keys
 
     def _rotate(self):

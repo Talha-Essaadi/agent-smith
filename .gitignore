@@ -2,9 +2,14 @@
 .venv/
 __pycache__/
 .mypy_cache/
+.codex/
+.aws/
+.agents/
 sandbox/fake_sandbox.py
 sandbox/mcp_tools.py
+.pytest_cache/
 tests/
+testbed/
 
 SPEC.md
 PLAN.md
@@ -15,6 +20,8 @@ test_orchestrator.py
 response.json
 uv.lock
 mbpp_solution.json
+swebench_solution.json
+task.json
 
 # EVAL
 moulinette

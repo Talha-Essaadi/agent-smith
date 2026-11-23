@@ -35,9 +35,8 @@ def _agent_process(
         f"time={time.perf_counter() - st:.1f}/{timeout_seconds:g}s · "
         f"requests={total_requests} · retries={total_retries}"
     )
-    l = len(status) + 2
     print(
-        f"\r\033[2K{RESET}{DIM} {status} {RESET}{CYAN}",
+        f"\r\033[2K{RESET}{DIM} {status} {RESET}",
         end="\r", file=sys.stderr, flush=True,
     )
 
@@ -144,7 +143,9 @@ class AgentOrchestrator:
                 total_requests += 1 + llm_resp.retries
                 total_retries += llm_resp.retries
                 request_time_ms = llm_resp.request_time_ms
-                messages.append({"role": "assistant", "content": llm_resp.content})
+                messages.append(
+                    {"role": "assistant", "content": llm_resp.content}
+                )
 
                 ext = self.extractor.extract(llm_resp.content)
                 exec_res = None
@@ -218,7 +219,9 @@ class AgentOrchestrator:
                 code_solution = last_valid_code
             if benchmark == "swebench":
                 try:
-                    patch_res = await self.sandbox.execute("print(get_patch())")
+                    patch_res = await self.sandbox.execute(
+                        "print(get_patch())"
+                    )
                     if patch_res.stdout.strip():
                         code_solution = patch_res.stdout.strip()
                 except Exception:
