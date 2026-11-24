@@ -1,0 +1,30 @@
+{
+  "task_id": "TEMPLATE_NOT_A_REAL_RUN",
+  "benchmark": "mbpp",
+  "success": false,
+  "solution": "",
+  "system_prompt": "Replace with the full system prompt sent to the model.",
+  "iterations": 1,
+  "total_requests": 1,
+  "total_input_tokens": 0,
+  "total_output_tokens": 0,
+  "total_time_seconds": 0.0,
+  "steps": [
+    {
+      "step": 1,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "request_time_ms": 0.0,
+      "timestamp": "1970-01-01T00:00:00",
+      "api_url": "",
+      "model_name": "",
+      "llm_output": "Replace with the raw model response.",
+      "sandbox_input": "",
+      "sandbox_output": "",
+      "extraction_error": null,
+      "retries": 0
+    }
+  ],
+  "error": "Template only; not an evaluation result. Replace all placeholder values and example metrics with actual run data. For SWE-bench, set benchmark to swebench and solution to the generated Git patch; for MBPP, solution contains standalone Python code.",
+  "timestamp": "1970-01-01T00:00:00"
+}
