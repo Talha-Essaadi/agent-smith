@@ -18,7 +18,7 @@ test.py
 chat.py
 test_orchestrator.py
 response.json
-uv.lock
+# uv.lock
 mbpp_solution.json
 swebench_solution.json
 task.json
