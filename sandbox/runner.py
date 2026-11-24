@@ -7,13 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-<<<<<<< HEAD
-from .swebench_docker import SWEBenchDockerManager
-from config.paths import TESTBED_PATH, TMP_PATH
-=======
 import docker
 from docker.errors import DockerException, ImageNotFound
->>>>>>> fix/neon
 
 from schemas.sandbox import ExecutionResult, SandboxConfig
 
@@ -58,28 +53,7 @@ class DockerRunner:
     """Manages a persistent, locked-down
      Docker container for sandboxed Python."""
 
-<<<<<<< HEAD
-
-
-        self.testbed_path = TESTBED_PATH
-        self.agent_path = TMP_PATH
-
-        if task:
-            self.image = task.docker_image
-            print(f"Using task-specific Docker image: {self.image}")
-            swe_docker =  SWEBenchDockerManager(self.image)
-            swe_docker.prepare_testbed()
-
-        self.import_guard = ImportGuard(
-            config.authorized_imports
-        )
-        self._ensure_image(task)
-        self.mcp_manager = mcp_manager
-
-    def _ensure_image(
-=======
     def __init__(
->>>>>>> fix/neon
         self,
         config: SandboxConfig,
         mcp_manager: Any = None,
@@ -94,18 +68,7 @@ class DockerRunner:
         self._frame_buffer = bytearray()
         self._stdout_buffer = bytearray()
 
-<<<<<<< HEAD
-        if task:
-            if not task.docker_image:
-                raise ValueError(
-                    "SWE-bench requires a task Docker image"
-                )
-
-            base_image = task.docker_image
-            self.image = base_image
-=======
         self._ensure_image()
->>>>>>> fix/neon
 
     def _ensure_image(self) -> None:
         """Build the reusable lightweight sandbox image if missing."""
@@ -154,98 +117,12 @@ class DockerRunner:
                 continue
             roots.append(path)
 
-<<<<<<< HEAD
-    def _handle_execution_timeout(self, container) -> ExecutionResult:
-        """Stop an execution that exceeded its configured wall-clock deadline."""
-        try:
-            container.kill()
-        except docker.errors.NotFound:
-            pass
-        except docker.errors.DockerException as exc:
-            logging.warning("Could not kill timed-out container: %s", exc)
-
-        # Abdo Debug # Partial stdout and stderr are not collected or returned on timeout.
-        return ExecutionResult(
-            error="Execution timed out.",
-            timed_out=True,
-        )
-
-    def _wait_for_execution(self, container) -> dict:
-        """Poll container state against a real monotonic deadline.
-
-        Docker's container.wait(timeout=...) sets an HTTP request timeout;
-        it is not itself a reliable execution timer.
-        """
-        deadline = time.monotonic() + self.config.max_execution_time_seconds
-        while True:
-            container.reload()
-            state = container.attrs["State"]
-            if not state.get("Running", False):
-                return {"StatusCode": state.get("ExitCode", 1)}
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Sandbox execution deadline exceeded")
-            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
-
-    def _handle_memory_limit(self, container) -> Optional[ExecutionResult]:
-        """Check whether the container exceeded its memory limit."""
-        try:
-            container.reload()
-            state = container.attrs["State"]
-
-            if state.get("OOMKilled", False):
-                return ExecutionResult(
-                    error=(
-                        f"Execution exceeded the memory limit "
-                        f"({self.config.max_memory_mb} MB)."
-                    ),
-                    resource_limit_exceeded=True,
-                )
-
-        except docker.errors.DockerException as exc:
-            raise RuntimeError(
-                f"Failed to inspect container state: {exc}"
-            ) from exc
-
-        return None
-
-    def _collect_output(self, container) -> tuple[str, str, bool]:
-        """Collect stdout/stderr from the container and apply byte limits."""
-        stdout = container.logs(stdout=True, stderr=False, stream=False)
-        stderr = container.logs(stdout=False, stderr=True, stream=False)
-        stdout = stdout or b""
-        stderr = stderr or b""
-        max_bytes = self.config.max_output_bytes
-
-        truncated = False
-
-        if len(stdout) + len(stderr) > max_bytes:
-            truncated = True
-
-            # Allocate half of the available output to each stream.
-            stdout_limit = max_bytes // 2
-            stderr_limit = max_bytes - stdout_limit
-
-            stdout = stdout[:stdout_limit]
-            stderr = stderr[:stderr_limit]
-
-        return (
-            stdout.decode("utf-8", errors="replace"),
-            stderr.decode("utf-8", errors="replace"),
-            truncated,
-        )
-
-    def _build_container_config(self) -> dict:
-        """Build Docker container settings."""
-
-        
-=======
         size_mb = max(16, self.config.max_disk_usage_mb)
         mount_opts = f"rw,noexec,nosuid,size={size_mb}m,mode=1777"
         return {path: mount_opts for path in roots}
 
     def _build_container_config(self) -> dict[str, Any]:
         mem_spec = f"{self.config.max_memory_mb}m"
->>>>>>> fix/neon
         return {
             "image": self.image,
             "working_dir": "/testbed",

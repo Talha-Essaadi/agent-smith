@@ -192,23 +192,6 @@ class SWEBenchCLI:
                 total_time_seconds=0.0,
                 error="Terminated by signal",
             )
-<<<<<<< HEAD
-        # except Exception as e:
-        #     # Build a minimal failure output so we always produce valid JSON
-        #     task_id = str(task.instance_id) if task else "unknown"
-        #     solution_output = SolutionOutput(
-        #         task_id=task_id,
-        #         benchmark="swebench",
-        #         success=False,
-        #         solution="",
-        #         iterations=0,
-        #         total_requests=0,
-        #         total_input_tokens=0,
-        #         total_output_tokens=0,
-        #         total_time_seconds=0.0,
-        #         error=str(e),
-        #     )
-=======
         except Exception as e:
             # Build a minimal failure output so we always produce valid JSON
             task_id = task.instance_id if task else "unknown"
@@ -224,7 +207,6 @@ class SWEBenchCLI:
                 total_time_seconds=0.0,
                 error=str(e),
             )
->>>>>>> fix/neon
         finally:
             try:
                 if solution_output is not None:

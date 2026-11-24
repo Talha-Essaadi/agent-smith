@@ -218,18 +218,10 @@ async def async_main() -> None:
         await interactive_loop(runner, manager)
 
     finally:
-<<<<<<< HEAD
-        # Abdo Debug # runner.close() is missing, so sandbox resources are not cleaned up here.
-        await manager.close()
-
-
-
-=======
         try:
             await manager.close()
         finally:
             runner.close()
->>>>>>> fix/neon
 
 
 def main():

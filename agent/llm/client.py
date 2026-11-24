@@ -172,10 +172,6 @@ class LLMClient:
                         )
                         time.sleep(backoff)
                         continue
-<<<<<<< HEAD
-=======
-
->>>>>>> fix/neon
                     parsed = self._parse_response_to_llmresponse(
                         messages, data, attempt, response_time
                     )
@@ -183,12 +179,8 @@ class LLMClient:
                     if not parsed.content.strip():
                         finish_reason = choices[0].get("finish_reason")
                         last_error = (
-<<<<<<< HEAD
-                            f"Empty LLM response; finish_reason={finish_reason!r}"
-=======
                             f"Empty LLM response; "
                             f"finish_reason={finish_reason!r}"
->>>>>>> fix/neon
                         )
                         time.sleep(backoff)
                         continue
