@@ -1,11 +1,44 @@
 import asyncio
 from typing import List, Dict, Optional
 import time
+import sys
 
 from agent.config import AgentLimits
 from agent.llm.client import LLMClient
 from schemas import BaseSandbox, SolutionOutput, StepMetrics
 from agent.extractor import CodeExtractor
+
+
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+
+def _agent_process(
+    task_id: str,
+    step_num: int,
+    max_iterations: int,
+    total_input_tokens: int,
+    max_input_tokens: int,
+    total_output_tokens: int,
+    max_output_tokens: int,
+    st: float,
+    timeout_seconds: float,
+    total_requests: int,
+    total_retries: int,
+    request_time_ms: float,
+    state: str,
+) -> None:
+    status = (
+        f"Task {task_id} · step {step_num}/{max_iterations} · "
+        f"state={state} · in={total_input_tokens}/{max_input_tokens} · "
+        f"out={total_output_tokens}/{max_output_tokens} · "
+        f"time={time.perf_counter() - st:.1f}/{timeout_seconds:g}s · "
+        f"requests={total_requests} · retries={total_retries}"
+    )
+    print(
+        f"\r\033[2K{RESET}{DIM} {status} {RESET}",
+        end="\r", file=sys.stderr, flush=True,
+    )
 
 
 class AgentOrchestrator:
@@ -43,6 +76,10 @@ class AgentOrchestrator:
         total_input_tokens = 0
         total_output_tokens = 0
         total_requests = 0
+        total_retries = 0
+        request_time_ms = 0.0
+        step_num = 0
+        pending = None
         success = False
         code_solution = ""
         last_valid_code = ""
@@ -71,11 +108,32 @@ class AgentOrchestrator:
 
                 try:
                     step_cap = 500 if benchmark.lower() == "mbpp" else 1500
-                    llm_resp = await asyncio.to_thread(
+                    pending = asyncio.ensure_future(asyncio.to_thread(
                         self.llm_client.generate,
                         messages,
                         min(step_cap, rem_out),
-                    )
+                    ))
+                    while True:
+                        _agent_process(
+                            task_id,
+                            step_num,
+                            self.limits.max_iterations,
+                            total_input_tokens,
+                            self.limits.max_input_tokens,
+                            total_output_tokens,
+                            self.limits.max_output_tokens,
+                            st,
+                            self.limits.timeout_seconds,
+                            total_requests,
+                            total_retries,
+                            request_time_ms,
+                            state="processing",
+                        )
+                        done, _ = await asyncio.wait({pending}, timeout=1.0)
+                        if done:
+                            break
+                    llm_resp = pending.result()
+                    pending = None
                 except Exception as e:
                     error_msg = str(e)
                     break
@@ -83,25 +141,46 @@ class AgentOrchestrator:
                 total_input_tokens += llm_resp.input_tokens
                 total_output_tokens += llm_resp.output_tokens
                 total_requests += 1 + llm_resp.retries
-                messages.append({"role": "assistant", "content": llm_resp.content})
+                total_retries += llm_resp.retries
+                request_time_ms = llm_resp.request_time_ms
+                messages.append(
+                    {"role": "assistant", "content": llm_resp.content}
+                )
 
                 ext = self.extractor.extract(llm_resp.content)
                 exec_res = None
                 if not ext.is_valid:
                     sandbox_input = ""
-                    sandbox_output = (
+                    sandbox_output = ""
+                    feedback = (
                         ext.error or "[ERROR: No valid code block found.]"
                     )
                     is_final = False
                 else:
                     sandbox_input = ext.code
                     last_valid_code = ext.code
+                    _agent_process(
+                        task_id,
+                        step_num,
+                        self.limits.max_iterations,
+                        total_input_tokens,
+                        self.limits.max_input_tokens,
+                        total_output_tokens,
+                        self.limits.max_output_tokens,
+                        st,
+                        self.limits.timeout_seconds,
+                        total_requests,
+                        total_retries,
+                        request_time_ms,
+                        state="processing",
+                    )
                     exec_res = await self.sandbox.execute(sandbox_input)
                     obs = exec_res.to_observation_string()
                     if ext.warning:
                         obs = f"{ext.warning}\n\n{obs}"
                     obs = self._truncate_observation(obs)
                     sandbox_output = obs
+                    feedback = obs
                     is_final = exec_res.is_final_answer
 
                 step = StepMetrics(
@@ -114,6 +193,7 @@ class AgentOrchestrator:
                     llm_output=llm_resp.content,
                     sandbox_input=sandbox_input,
                     sandbox_output=sandbox_output,
+                    extraction_error=ext.error,
                     retries=llm_resp.retries
                 )
                 steps.append(step)
@@ -126,21 +206,46 @@ class AgentOrchestrator:
 
                 messages.append({
                     "role": "user",
-                    "content": f"Observation:\n{sandbox_output}"
+                    "content": f"Observation:\n{feedback}"
                 })
         except asyncio.CancelledError:
             error_msg = "Agent terminated by signal"
+        finally:
+            if pending is not None and not pending.done():
+                pending.cancel()
 
         if not success and not code_solution:
             if benchmark == "mbpp" and last_valid_code:
                 code_solution = last_valid_code
             if benchmark == "swebench":
                 try:
-                    patch_res = await self.sandbox.execute("print(get_patch())")
+                    patch_res = await self.sandbox.execute(
+                        "print(get_patch())"
+                    )
                     if patch_res.stdout.strip():
                         code_solution = patch_res.stdout.strip()
                 except Exception:
                     pass
+
+        state = "success" if success else "failed"
+        _agent_process(
+            task_id,
+            step_num,
+            self.limits.max_iterations,
+            total_input_tokens,
+            self.limits.max_input_tokens,
+            total_output_tokens,
+            self.limits.max_output_tokens,
+            st,
+            self.limits.timeout_seconds,
+            total_requests,
+            total_retries,
+            request_time_ms,
+            state=state,
+        )
+        print(file=sys.stderr, flush=True)
+        if error_msg:
+            print(f"Task {task_id}: {error_msg}", file=sys.stderr, flush=True)
 
         return SolutionOutput(
             task_id=task_id,

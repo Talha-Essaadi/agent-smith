@@ -3,10 +3,20 @@ import os
 from pydantic import BaseModel
 
 
-def resolve_llm_settings(model_name: str | None,
-                         provider_url: str | None) -> tuple[str, str]:
-    model = model_name if model_name is not None else os.getenv("MODEL_NAME", "")
-    url = provider_url if provider_url is not None else os.getenv("PROVIDER_URL", "")
+def resolve_llm_settings(
+    model_name: str | None,
+    provider_url: str | None
+) -> tuple[str, str]:
+    model = (
+        model_name
+        if model_name is not None
+        else os.getenv("MODEL_NAME", "")
+    )
+    url = (
+        provider_url
+        if provider_url is not None
+        else os.getenv("PROVIDER_URL", "")
+    )
     model, url = model.strip(), url.strip()
     missing = []
     if not model:
@@ -14,7 +24,9 @@ def resolve_llm_settings(model_name: str | None,
     if not url:
         missing.append("--provider-url (or PROVIDER_URL)")
     if missing:
-        raise ValueError("Missing LLM configuration. Set " + " and ".join(missing) + ".")
+        raise ValueError(
+            "Missing LLM configuration. Set " + " and ".join(missing) + "."
+        )
     return model, url
 
 
@@ -45,17 +57,22 @@ SWE_LIMITS = AgentLimits(
 
 
 class AgentConfig(BaseModel):
-    def get_limits(self, benchmark: str,
-                   max_iterations_override: int | None = None) -> AgentLimits:
+    def get_limits(
+        self,
+        benchmark: str,
+        max_iterations_override: int | None = None
+    ) -> AgentLimits:
         if benchmark.strip().lower() == "mbpp":
             if max_iterations_override is not None:
                 return MBPP_LIMITS.model_copy(
-                    update={"max_iterations": max_iterations_override})
+                    update={"max_iterations": max_iterations_override}
+                )
             return MBPP_LIMITS
         elif benchmark.strip().lower() == "swebench":
             if max_iterations_override is not None:
                 return SWE_LIMITS.model_copy(
-                    update={"max_iterations": max_iterations_override})
+                    update={"max_iterations": max_iterations_override}
+                )
             return SWE_LIMITS
         else:
             raise ValueError(

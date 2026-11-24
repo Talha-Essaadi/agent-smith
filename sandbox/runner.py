@@ -1,51 +1,64 @@
-
-import docker
-import io
-import tarfile
-from docker.errors import ImageNotFound
-from schemas.sandbox import SandboxConfig, ExecutionResult
-from typing import Optional
-from .import_guard import ImportGuard
-from pathlib import Path
-import subprocess
-import traceback
-import logging
 import asyncio
 import json
+import posixpath
 import select
+import subprocess
 import time
-import os
 from pathlib import Path
+from typing import Any
 
+<<<<<<< HEAD
 from .swebench_docker import SWEBenchDockerManager
 from config.paths import TESTBED_PATH, TMP_PATH
+=======
+import docker
+from docker.errors import DockerException, ImageNotFound
+>>>>>>> fix/neon
 
-def _extract_frames(buffer: bytearray):
-    frames = []
+from schemas.sandbox import ExecutionResult, SandboxConfig
 
+
+_SANDBOX_IMAGE = "agent-sandbox:latest"
+_MCP_CALL_SAFETY_TIMEOUT_SECONDS = 600.0
+
+
+def _extract_frames(buffer: bytearray) -> list[tuple[int, bytes]]:
+    frames: list[tuple[int, bytes]] = []
     while len(buffer) >= 8:
         stream_id = buffer[0]
         length = int.from_bytes(buffer[4:8], "big")
-
         if len(buffer) < 8 + length:
             break
-
-        payload = bytes(buffer[8:8 + length])
-        del buffer[:8 + length]
-
+        payload = bytes(buffer[8: 8 + length])
+        del buffer[: 8 + length]
         frames.append((stream_id, payload))
-
     return frames
 
 
+def _truncate_streams(
+    stdout: str,
+    stderr: str,
+    max_bytes: int,
+) -> tuple[str, str, bool]:
+    stdout_bytes = stdout.encode("utf-8", errors="replace")
+    stderr_bytes = stderr.encode("utf-8", errors="replace")
+    if len(stdout_bytes) + len(stderr_bytes) <= max_bytes:
+        return stdout, stderr, False
+
+    stdout_limit = max_bytes // 2
+    stderr_limit = max_bytes - stdout_limit
+    return (
+        stdout_bytes[:stdout_limit].decode("utf-8", errors="replace"),
+        stderr_bytes[:stderr_limit].decode("utf-8", errors="replace"),
+        True,
+    )
+
 
 class DockerRunner:
-    def __init__(self, config: SandboxConfig, mcp_manager=None, task=None) -> None:
-        """Store configuration and initialize the Docker client."""
-        self.config = config
-        self.client = docker.from_env()
-        self.image = "agent-sandbox:latest"
+    """Manages a persistent, locked-down
+     Docker container for sandboxed Python."""
 
+<<<<<<< HEAD
 
 
         self.testbed_path = TESTBED_PATH
@@ -64,14 +77,24 @@ class DockerRunner:
         self.mcp_manager = mcp_manager
 
     def _ensure_image(
+=======
+    def __init__(
+>>>>>>> fix/neon
         self,
-        task: str | None = None,
+        config: SandboxConfig,
+        mcp_manager: Any = None,
     ) -> None:
-        """Ensure the correct sandbox image exists."""
+        self.config = config
+        self.mcp_manager = mcp_manager
+        self.client = docker.from_env()
+        self.image = _SANDBOX_IMAGE
 
-        base_image = "python:3.10-slim"
-        self.image = "agent-sandbox:mbpp"
+        self._container = None
+        self._connection = None
+        self._frame_buffer = bytearray()
+        self._stdout_buffer = bytearray()
 
+<<<<<<< HEAD
         if task:
             if not task.docker_image:
                 raise ValueError(
@@ -80,32 +103,58 @@ class DockerRunner:
 
             base_image = task.docker_image
             self.image = base_image
+=======
+        self._ensure_image()
+>>>>>>> fix/neon
 
+    def _ensure_image(self) -> None:
+        """Build the reusable lightweight sandbox image if missing."""
         try:
             self.client.images.get(self.image)
-            print(f"Image {self.image} already exists.")
             return
-
         except ImageNotFound:
-            print(f"Building image from {base_image}...")
+            pass
 
         context = Path(__file__).resolve().parent
         repository_root = context.parent
+        dockerfile = repository_root / "Dockerfile"
+        if not dockerfile.is_file():
+            dockerfile = context / "Dockerfile"
 
         subprocess.run(
             [
-                "docker", "build",
-                "--build-arg", f"BASE_IMAGE={base_image}",
-                "-t", self.image,
-                "-f", str(context / "Dockerfile"),
+                "docker",
+                "build",
+                "--build-arg",
+                "BASE_IMAGE=python:3.10-slim",
+                "-t",
+                self.image,
+                "-f",
+                str(dockerfile),
                 str(repository_root),
             ],
             check=True,
         )
 
-        print("Image built successfully.")
+    def _build_tmpfs_mounts(self) -> dict[str, str]:
+        """Mount writable tmpfs for each configured allowed_directory."""
+        normalized: list[str] = []
+        for raw_dir in self.config.allowed_directories:
+            norm = posixpath.normpath(raw_dir)
+            if not norm.startswith("/") or norm == "/":
+                continue
+            if norm not in normalized:
+                normalized.append(norm)
 
+        # Avoid overlapping nested tmpfs mounts (parent covers child).
+        normalized.sort(key=len)
+        roots: list[str] = []
+        for path in normalized:
+            if any(path.startswith(parent + "/") for parent in roots):
+                continue
+            roots.append(path)
 
+<<<<<<< HEAD
     def _handle_execution_timeout(self, container) -> ExecutionResult:
         """Stop an execution that exceeded its configured wall-clock deadline."""
         try:
@@ -189,430 +238,434 @@ class DockerRunner:
         """Build Docker container settings."""
 
         
+=======
+        size_mb = max(16, self.config.max_disk_usage_mb)
+        mount_opts = f"rw,noexec,nosuid,size={size_mb}m,mode=1777"
+        return {path: mount_opts for path in roots}
+
+    def _build_container_config(self) -> dict[str, Any]:
+        mem_spec = f"{self.config.max_memory_mb}m"
+>>>>>>> fix/neon
         return {
             "image": self.image,
-            "command": ["python", "/opt/agent/main.py"], # change the main path
             "working_dir": "/testbed",
             "network_mode": "none",
             "stdin_open": True,
             "tty": False,
             "detach": True,
-            # Privilege restrictions
-            # Abdo Debug # The sandbox runs untrusted code as root instead of an unprivileged user.
-            "user": "0:0",
+            "user": "1000:1000",
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
-            # Filesystem restrictions
-            # Abdo Debug # Read-only mode blocks writes but still allows reads outside allowed paths.
             "read_only": True,
-            # Abdo Debug # These fixed mounts ignore config.allowed_directories, including custom paths.
-            "volumes": {
-                f"{str(self.testbed_path)}": {
-                    "bind": "/testbed",
-                    "mode": "rw",
-                },
-                f"{str(self.agent_path)}": {
-                    "bind": "/tmp/agent",
-                    "mode": "rw",
-                },
-            },
-            # Resource restrictions
-            # "nano_cpus": int(self.config.max_cpu_cores * 1_000_000_000),
+            "tmpfs": self._build_tmpfs_mounts(),
             "pids_limit": self.config.max_processes,
-            "mem_limit": f"{self.config.max_memory_mb}m",
-            # "storage_opt": {
-            #     "size": f"{self.config.max_disk_usage_mb}m"
-            # },
-
+            "mem_limit": mem_spec,
+            "memswap_limit": mem_spec,
         }
 
-    def _read_final_answer(self, container) -> dict:
-        """Read the final answer result from the Docker container."""
-
-        # Abdo Debug # This trusts result.json from a directory writable by untrusted code.
-        archive, _ = container.get_archive("/tmp/agent/result.json")
-
-        with tarfile.open(fileobj=io.BytesIO(b"".join(archive)), mode="r:*") as tar:
-            file = tar.extractfile("result.json")
-
-            if file is None:
-                raise FileNotFoundError("result.json not found in Docker archive")
-
-            return json.load(file)
-
-    def _close_attachment(self, connection):
-        """Close a Docker socket attachment."""
+    def _close_attachment(self, connection: Any) -> None:
         if connection is None:
             return
-
         response = getattr(connection, "_response", None)
-
         try:
             if response is not None:
                 response.close()
-        finally:
+        except Exception:
+            pass
+        try:
             connection.close()
+        except Exception:
+            pass
 
-    def _debug_container(self, container) -> None:
-        """Best-effort diagnostics without masking the original error."""
-        if container is None:
-            return
-        print(f"[DEBUG] Container ID: {container.id}", flush=True)
+    def _destroy_container(self) -> None:
+        connection = self._connection
+        container = self._container
+        self._connection = None
+        self._container = None
+        self._frame_buffer.clear()
+        self._stdout_buffer.clear()
+
+        self._close_attachment(connection)
+        if container is not None:
+            try:
+                container.remove(force=True)
+            except DockerException:
+                pass
+
+    def _check_oom(self, container: Any) -> bool:
         try:
             container.reload()
-            print("[DEBUG] State:", container.attrs.get("State"), flush=True)
-            print("[DEBUG] Image:", container.attrs.get("Config", {}).get("Image"), flush=True)
-            print("[DEBUG] Command:", container.attrs.get("Config", {}).get("Cmd"), flush=True)
-        except docker.errors.DockerException as exc:
-            print("[DEBUG] Inspect failed:", repr(exc), flush=True)
+            state = container.attrs.get("State") or {}
+            return bool(state.get("OOMKilled")) or state.get("ExitCode") == 137
+        except DockerException:
+            return False
+
+    def _send_json_line(self, payload: dict[str, Any]) -> None:
+        if self._connection is None:
+            raise RuntimeError("Sandbox IPC connection is closed")
+        data = (json.dumps(payload) + "\n").encode("utf-8")
+        self._connection._sock.sendall(data)
+
+    def _read_next_message_sync(
+        self,
+        timeout_seconds: float,
+    ) -> dict[str, Any] | None:
+        """Read one JSON IPC message from container stdout;
+         returns None on EOF."""
+        if self._connection is None:
+            return None
+        sock = self._connection._sock
+        deadline = time.monotonic() + timeout_seconds
+
+        while True:
+            if b"\n" in self._stdout_buffer:
+                line, _, remaining = self._stdout_buffer.partition(b"\n")
+                self._stdout_buffer = bytearray(remaining)
+                if not line.strip():
+                    continue
+                return json.loads(line.decode("utf-8", errors="replace"))
+
+            remaining_time = deadline - time.monotonic()
+            if remaining_time <= 0:
+                raise TimeoutError("Sandbox execution timed out")
+
+            readable, _, _ = select.select(
+                [sock], [], [], min(0.05, remaining_time)
+            )
+            if not readable:
+                continue
+
+            chunk = sock.recv(65536)
+            if not chunk:
+                return None
+
+            self._frame_buffer.extend(chunk)
+            for stream_id, payload in _extract_frames(self._frame_buffer):
+                if stream_id == 1:
+                    self._stdout_buffer.extend(payload)
+
+    def _collect_container_diagnostics(self, container: Any) -> str:
         try:
-            out = container.logs(stdout=True, stderr=False)
-            err = container.logs(stdout=False, stderr=True)
-            print("[DEBUG] STDOUT:", (out or b"").decode(errors="replace")[-4000:], flush=True)
-            print("[DEBUG] STDERR:", (err or b"").decode(errors="replace")[-4000:], flush=True)
-        except docker.errors.DockerException as exc:
-            print("[DEBUG] Logs failed:", repr(exc), flush=True)
+            container.reload()
+            state = container.attrs.get("State") or {}
+            exit_code = state.get("ExitCode")
+            state_error = state.get("Error") or ""
+            logs = (
+                container.logs(stdout=True, stderr=True)
+                .decode("utf-8", errors="replace")
+                .strip()
+            )
+            return (
+                f"exit_code={exit_code}, state_error={state_error!r}, "
+                f"logs={logs[-500:]!r}"
+            )
+        except Exception as exc:
+            return f"(failed to read container logs: {exc})"
 
+    def _ensure_container(self) -> None:
+        if self._container is not None:
+            try:
+                self._container.reload()
+                if self._container.attrs.get("State", {}).get("Running"):
+                    return
+            except DockerException:
+                pass
+            self._destroy_container()
 
-    async def _dispatch_tool_request(self, request: dict) -> dict:
-        request_id = request["id"]
+        container = self.client.containers.create(
+            **self._build_container_config()
+        )
+        connection = container.attach_socket(
+            params={"stdin": 1, "stdout": 1, "stream": 1}
+        )
+        container.start()
+
+        self._container = container
+        self._connection = connection
+        self._frame_buffer.clear()
+        self._stdout_buffer.clear()
+
+        try:
+            self._send_json_line({
+                "type": "init",
+                "authorized_imports": self.config.authorized_imports,
+                "allowed_directories": self.config.allowed_directories,
+                "max_memory_mb": self.config.max_memory_mb,
+            })
+            ready = self._read_next_message_sync(timeout_seconds=15.0)
+            if not ready or ready.get("type") != "ready":
+                details = self._collect_container_diagnostics(container)
+                raise RuntimeError(
+                    f"Sandbox container failed to initialize ({details})"
+                )
+        except BaseException:
+            self._destroy_container()
+            raise
+
+    async def _dispatch_mcp_request(
+        self,
+        request: dict[str, Any],
+        allowed_tools: set[str],
+    ) -> dict[str, Any]:
+        req_id = request.get("id")
+        req_type = request.get("type")
 
         try:
             if self.mcp_manager is None:
                 raise RuntimeError("MCP manager not configured")
 
-            tool_name = request["name"]
-            arguments = request.get("arguments", {})
+            if req_type == "tool_call":
+                tool_name = request["name"]
+                if tool_name not in allowed_tools:
+                    raise RuntimeError(f"Unauthorized MCP tool: {tool_name}")
 
-            # 1. Execute the MCP tool
-            result = await self.mcp_manager.call_tool(
-                tool_name,
-                arguments,
-            )
-
-            # 2. Check whether MCP reported an error
-            if result.isError:
-                error_text = "\n".join(
-                    item.text
-                    for item in result.content
-                    if item.type == "text"
+                result = await self.mcp_manager.call_tool(
+                    tool_name,
+                    request.get("arguments", {}),
                 )
-                raise RuntimeError(error_text or "MCP tool reported an error")
+                texts = [
+                    getattr(item, "text", str(item))
+                    for item in result.content
+                ]
+                combined = "\n".join(texts)
+                if result.isError:
+                    raise RuntimeError(
+                        combined or "MCP tool reported an error"
+                    )
+                return {
+                    "type": "tool_result",
+                    "id": req_id,
+                    "success": True,
+                    "result": combined,
+                }
 
-            # 3. Extract text from the MCP response
-            texts = [
-                item.text
-                for item in result.content
-                if item.type == "text"
-            ]
+            if req_type == "mcp_list_resources":
+                return {
+                    "type": "mcp_result",
+                    "id": req_id,
+                    "success": True,
+                    "result": self.mcp_manager.list_resources(),
+                }
 
-            tool_result = "\n".join(texts)
+            if req_type == "mcp_read_resource":
+                res = await self.mcp_manager.read_resource(request["uri"])
+                parts = []
+                for content in res.contents:
+                    if hasattr(content, "text") and content.text is not None:
+                        parts.append(content.text)
+                    elif hasattr(content, "blob") and content.blob is not None:
+                        parts.append(str(content.blob))
+                return {
+                    "type": "mcp_result",
+                    "id": req_id,
+                    "success": True,
+                    "result": "\n".join(parts),
+                }
 
-            # 4. Send the extracted result back to the container
-            return {
-                "type": "tool_result",
-                "id": request_id,
-                "success": True,
-                "result": tool_result,
-            }
+            if req_type == "mcp_list_prompts":
+                return {
+                    "type": "mcp_result",
+                    "id": req_id,
+                    "success": True,
+                    "result": self.mcp_manager.list_prompts(),
+                }
+
+            if req_type == "mcp_get_prompt":
+                res = await self.mcp_manager.get_prompt(
+                    request["name"],
+                    request.get("arguments") or {},
+                )
+                messages = [
+                    {
+                        "role": msg.role,
+                        "content": getattr(
+                            msg.content, "text", str(msg.content)
+                        ),
+                    }
+                    for msg in res.messages
+                ]
+                return {
+                    "type": "mcp_result",
+                    "id": req_id,
+                    "success": True,
+                    "result": messages,
+                }
+
+            raise RuntimeError(f"Unknown IPC request type: {req_type}")
 
         except Exception as exc:
             return {
                 "type": "tool_result",
-                "id": request_id,
+                "id": req_id,
                 "success": False,
                 "error": str(exc),
             }
 
-
-
-    async def _process_ipc(
-        self,
-        container,
-        connection,
-        deadline,
-        allowed_tools,
-    ):
-        sock = connection._sock
-        frame_buffer = bytearray()
-        stdout_buffer = bytearray()
-
-        while True:
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Sandbox execution timed out")
-
-            readable, _, _ = await asyncio.to_thread(
-                select.select, [sock], [], [], 0.1
-            )
-
-            if readable:
-                data = await asyncio.to_thread(sock.recv, 65536)
-
-                if not data:
-                    # Socket closed: retrieve the container exit status.
-                    await asyncio.to_thread(container.reload)
-                    state = container.attrs["State"]
-
-                    if state["Running"]:
-                        raise RuntimeError(
-                            "IPC socket closed while container is running"
-                        )
-
-                    if frame_buffer or stdout_buffer:
-                        raise RuntimeError(
-                            "IPC socket closed with incomplete message"
-                        )
-
-                    return {"StatusCode": state["ExitCode"]}
-
-                frame_buffer.extend(data)
-
-                for stream_id, payload in _extract_frames(frame_buffer):
-                    if stream_id != 1:
-                        continue
-
-                    stdout_buffer.extend(payload)
-
-                    while b"\n" in stdout_buffer:
-                        line, _, remaining = stdout_buffer.partition(b"\n")
-                        stdout_buffer = bytearray(remaining)
-
-                        if not line:
-                            continue
-
-                        request = json.loads(line.decode("utf-8"))
-
-                        if request.get("type") != "tool_call":
-                            raise RuntimeError("Unexpected IPC message")
-
-                        if request.get("name") not in allowed_tools:
-                            raise RuntimeError("Unauthorized MCP tool")
-
-                        remaining_time = deadline - time.monotonic()
-
-                        if remaining_time <= 0:
-                            raise TimeoutError(
-                                "Sandbox execution timed out"
-                            )
-
-                        # Abdo Debug # External MCP actions share the Python deadline, so long tests time out.
-                        response = await asyncio.wait_for(
-                            self._dispatch_tool_request(request),
-                            timeout=remaining_time,
-                        )
-
-                        message = (
-                            json.dumps(response) + "\n"
-                        ).encode("utf-8")
-
-                        await asyncio.to_thread(
-                            sock.sendall,
-                            message,
-                        )
-
-            # Refresh container state.
-            await asyncio.to_thread(container.reload)
-            container_state = container.attrs["State"]
-
-            # Do not return immediately after the container exits.
-            # Continue reading until the socket reaches EOF.
-            if not container_state["Running"]:
-                continue
-
-
     async def run(
         self,
         code: str,
-        tools: list[str] | None = None, # you have to handle tools=None case
+        tools: list[Any] | None = None,
     ) -> ExecutionResult:
-        """Execute code in an isolated container and return the result."""
+        """Execute Python code in the persistent sandbox container."""
+        safe_tools = tools or []
+        discovered_tool_names = {tool.name for tool in safe_tools}
 
-        container = None
-        connection = None
-        discovered_tool_names = [
-            tool.name
-            for tool in tools
-        ]
+        partial_stdout: list[str] = []
+        partial_stderr: list[str] = []
 
         try:
-            # 1. Validate authorized imports
-            self.import_guard.validate(code)
+            await asyncio.to_thread(self._ensure_container)
 
-            # 2. Create Docker container
-            # Abdo Debug # A fresh container on every run loses Python variables between steps.
-            container = self.client.containers.create(
-                **self._build_container_config()
-            )
-
-            # Abdo Debug # These stdout debug prints add noise that can interfere with automated tests.
-            print("[DEBUG] Created container:", container.short_id, flush=True)
-            # self.mcp_manager.set_container_id(container.id)
-            # 3. Attach to stdin before starting
-            connection = container.attach_socket(
-                params={
-                    "stdin": 1,
-                    "stdout": 1,
-                    "stream": 1,
-                }
-            )
-
-            # 4. Start container
-            container.start()
-            print("[DEBUG] Container started", flush=True)
-
-            # 5. Send code as one JSON line and MCP tools
             discovered_tools = [
                 {
                     "name": tool.name,
                     "inputSchema": tool.inputSchema,
                 }
-                for tool in (tools or [])
+                for tool in safe_tools
             ]
 
-            message = json.dumps({
-                "code": code,
-                "tools": discovered_tools,
-            }) + "\n"
-
-            connection._sock.sendall(
-                message.encode("utf-8")
+            await asyncio.to_thread(
+                self._send_json_line,
+                {"type": "exec", "code": code, "tools": discovered_tools},
             )
 
-            print("[DEBUG] Sent JSON line:", len(message), "characters", flush=True)
+            # Budget applies ONLY to sandboxed Python code,
+            # NOT external MCP calls.
+            remaining_budget = float(self.config.max_execution_time_seconds)
 
-            # No shutdown(1) needed.
-            # The container reads until newline.
+            while True:
+                if remaining_budget <= 0:
+                    raise TimeoutError("Sandbox execution timed out")
 
-            # 6. Enforce the execution deadline.
-            # try:
-            #     print("[DEBUG] Waiting for container to exit...", flush=True)
-            #     result = self._wait_for_execution(container)
-            #     print("[DEBUG] Exit status:", result, flush=True)
-            # except TimeoutError:
-            #     return self._handle_execution_timeout(container)
-            try:
-                deadline = (
-                    time.monotonic()
-                    + self.config.max_execution_time_seconds
+                wait_start = time.monotonic()
+                msg = await asyncio.to_thread(
+                    self._read_next_message_sync,
+                    remaining_budget,
                 )
+                remaining_budget -= time.monotonic() - wait_start
 
-                result = await self._process_ipc(
-                    container,
-                    connection,
-                    deadline,
-                    set(discovered_tool_names or []),
-                )
+                if msg is None:
+                    # Container exited unexpectedly (likely OOM or crash).
+                    container = self._container
+                    oom = container is not None and await asyncio.to_thread(
+                        self._check_oom, container
+                    )
+                    self._destroy_container()
+                    stdout, stderr, truncated = _truncate_streams(
+                        "".join(partial_stdout),
+                        "".join(partial_stderr),
+                        self.config.max_output_bytes,
+                    )
+                    if oom:
+                        return ExecutionResult(
+                            stdout=stdout,
+                            stderr=stderr,
+                            truncated=truncated,
+                            error=(
+                                f"Execution exceeded the memory limit "
+                                f"({self.config.max_memory_mb} MB)."
+                            ),
+                            resource_limit_exceeded=True,
+                        )
+                    return ExecutionResult(
+                        stdout=stdout,
+                        stderr=stderr,
+                        truncated=truncated,
+                        error="Sandbox container exited unexpectedly.",
+                    )
 
-            except TimeoutError:
-                return self._handle_execution_timeout(container)
+                msg_type = msg.get("type")
 
-            # 7. Check memory restriction
-            memory_error = self._handle_memory_limit(container)
+                if msg_type == "stream":
+                    stream = msg.get("stream")
+                    data = msg.get("data", "")
+                    if stream == "stdout":
+                        partial_stdout.append(data)
+                    elif stream == "stderr":
+                        partial_stderr.append(data)
+                    continue
 
-            if memory_error:
-                return memory_error
+                if msg_type in (
+                    "tool_call",
+                    "mcp_list_resources",
+                    "mcp_read_resource",
+                    "mcp_list_prompts",
+                    "mcp_get_prompt",
+                ):
+                    # Sandbox execution timer is paused
+                    # during external MCP call.
+                    response = await asyncio.wait_for(
+                        self._dispatch_mcp_request(msg, discovered_tool_names),
+                        timeout=_MCP_CALL_SAFETY_TIMEOUT_SECONDS,
+                    )
+                    await asyncio.to_thread(self._send_json_line, response)
+                    continue
 
-            # 8. Collect stdout and stderr
-            stdout, stderr, truncated = self._collect_output(
-                container
+                if msg_type == "exec_result":
+                    control_exc = msg.get("control_exception")
+                    if control_exc == "KeyboardInterrupt":
+                        self._destroy_container()
+                        raise KeyboardInterrupt(msg.get("error", ""))
+                    if control_exc == "SystemExit":
+                        self._destroy_container()
+                        raise SystemExit(msg.get("error", ""))
+
+                    stdout, stderr, truncated = _truncate_streams(
+                        msg.get("stdout", ""),
+                        msg.get("stderr", ""),
+                        self.config.max_output_bytes,
+                    )
+                    return ExecutionResult(
+                        stdout=stdout,
+                        stderr=stderr,
+                        error=msg.get("error"),
+                        truncated=truncated,
+                        is_final_answer=bool(msg.get("called", False)),
+                        final_answer_value=msg.get("value"),
+                        resource_limit_exceeded=bool(
+                            msg.get("resource_limit_exceeded", False)
+                        ),
+                    )
+
+        except TimeoutError:
+            self._destroy_container()
+            stdout, stderr, truncated = _truncate_streams(
+                "".join(partial_stdout),
+                "".join(partial_stderr),
+                self.config.max_output_bytes,
             )
-
-            # 9. Handle nonzero exit code
-            exit_code = result["StatusCode"]
-
-            if exit_code != 0:
-                return ExecutionResult(
-                    stdout=stdout,
-                    stderr=stderr,
-                    truncated=truncated,
-                    error=(
-                        f"Container exited with code {exit_code}."
-                    ),
-                )
-
-            # 10. Read the generated code's result from result.json.
-            try:
-                final_result = self._read_final_answer(container)
-            except (docker.errors.DockerException, FileNotFoundError,
-                    KeyError, tarfile.TarError, OSError, ValueError) as exc:
-                return ExecutionResult(
-                    stdout=stdout,
-                    stderr=stderr,
-                    truncated=truncated,
-                    error=f"Failed to read sandbox result.json: {exc}",
-                )
-
-            # 11. Apply the output byte limit to captured code output too.
-            output_stdout = final_result.get("stdout", "")
-            output_stderr = final_result.get("stderr", "")
-            max_bytes = self.config.max_output_bytes
-            stdout_bytes = output_stdout.encode("utf-8")
-            stderr_bytes = output_stderr.encode("utf-8")
-            if len(stdout_bytes) + len(stderr_bytes) > max_bytes:
-                truncated = True
-                stdout_bytes = stdout_bytes[:max_bytes // 2]
-                stderr_bytes = stderr_bytes[:max_bytes - max_bytes // 2]
-                output_stdout = stdout_bytes.decode("utf-8", errors="replace")
-                output_stderr = stderr_bytes.decode("utf-8", errors="replace")
-
             return ExecutionResult(
-                stdout=output_stdout,
-                stderr=output_stderr,
+                stdout=stdout,
+                stderr=stderr,
                 truncated=truncated,
-                error=final_result.get("error"),
-                is_final_answer=final_result.get("called", False),
-                final_answer_value=final_result.get("value"),
+                error=(
+                    f"Execution timed out after "
+                    f"{self.config.max_execution_time_seconds} seconds."
+                ),
+                timed_out=True,
             )
 
-        except ImportError as exc:
-            return ExecutionResult(
-                error=str(exc)
-            )
+        except (KeyboardInterrupt, SystemExit):
+            self._destroy_container()
+            raise
 
-        except docker.errors.DockerException as exc:
-            print("[DEBUG] Docker exception:", flush=True)
-            traceback.print_exc()
-            self._debug_container(container)
+        except DockerException as exc:
+            self._destroy_container()
             return ExecutionResult(error=f"Docker error: {exc}")
 
         except Exception as exc:
-            print("[DEBUG] Unexpected exception:", flush=True)
-            traceback.print_exc()
-            self._debug_container(container)
+            self._destroy_container()
             return ExecutionResult(error=f"Sandbox error: {exc}")
 
-        finally:
-            # 12. Close Docker attachment
-            if connection is not None:
-                try:
-                    self._close_attachment(connection)
-                except Exception as exc:
-                    print(f"[DEBUG] Attachment cleanup error: {exc}", flush=True)
-
-            # 13. Remove container
-            # Abdo Debug # Removing the container also discards its Python namespace after each step.
-            if container is not None:
-                try:
-                    container.remove(force=True)
-                except docker.errors.DockerException:
-                    pass
-
-    def _cleanup_volumes(self) -> None:
-        """Remove task volumes."""
-
-        #  the testbed/agent path doesn't a volume object
-        #  you have to remove the tmp folders path
-        for volume in (self.testbed_path, self.agent_path):
-            if volume is not None:
-                try:
-                    volume.remove()
-                except docker.errors.DockerException:
-                    pass
-
-        self.testbed_path = None
-        self.agent_path = None
-
     def close(self) -> None:
-        """Close the Docker client."""
-        self._cleanup_volumes()
-        self.client.close()
+        """Shut down the sandbox container and close the Docker client."""
+        try:
+            if self._connection is not None:
+                self._send_json_line({"type": "shutdown"})
+        except Exception:
+            pass
+        self._destroy_container()
+        try:
+            self.client.close()
+        except Exception:
+            pass

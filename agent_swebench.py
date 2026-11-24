@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 from pathlib import Path
 import shlex
 import signal
@@ -15,6 +16,7 @@ from agent import (
     resolve_llm_settings,
 )
 from sandbox import MCPManager, Sandbox
+from sandbox.swebench_docker import SWEBenchDockerManager
 from schemas import SWEBenchTaskInput, SandboxConfig, SolutionOutput
 
 
@@ -114,19 +116,16 @@ class SWEBenchCLI:
             )
             task = self._load_task()
 
-            # Initialize SWEDockerManager and get container and testbed dir
-            # Abdo Debug # This disabled setup never starts the task container or prepares its testbed.
-            # docker_manager = SWEBenchDockerManager(task.docker_image)
-            # container_id, testbed_dir = await asyncio.to_thread(docker_manager.start)
-            # Set environment variables for MCP tools
-            # Abdo Debug # This disabled block leaves the MCP tools without the task's environment settings.
-            # mcp_env = os.environ.copy()
-            # mcp_env.update({
-            #     "TESTBED_PATH": str(testbed_dir),
-            #     "SWE_CONTAINER_ID": container_id,
-            #     "SWE_EVAL_SCRIPT": task.eval_script
-            # })
-            mcp_env = None
+            docker_manager = SWEBenchDockerManager(task.docker_image)
+            container_id = await asyncio.to_thread(docker_manager.start)
+            testbed_dir = "/testbed"
+
+            mcp_env = os.environ.copy()
+            mcp_env.update({
+                "TESTBED_PATH": str(testbed_dir),
+                "SWE_CONTAINER_ID": container_id,
+                "SWE_EVAL_SCRIPT": task.eval_script
+            })
 
             llm_client = LLMClient(
                 model_name=model_name,
@@ -155,7 +154,9 @@ class SWEBenchCLI:
                     url=self.args.mcp_server,
                 )
             else:
-                mcp_script = Path(__file__).resolve().parent / "mcp_tools_swebench.py"
+                mcp_script = (
+                    Path(__file__).resolve().parent / "mcp_tools_swebench.py"
+                )
                 await mcp_manager.connect_stdio(
                     server_name="swebench",
                     command=sys.executable,
@@ -163,7 +164,7 @@ class SWEBenchCLI:
                     env=mcp_env,
                 )
 
-            sandbox = Sandbox(sandbox_config, mcp_manager, task)
+            sandbox = Sandbox(sandbox_config, mcp_manager)
             system_prompt = PromptBuilder.build_swebench_system_prompt(
                 sandbox.get_manual("swebench")
             )
@@ -171,13 +172,13 @@ class SWEBenchCLI:
 
             orchestrator = AgentOrchestrator(llm_client, sandbox, limits)
             solution_output = await orchestrator.run(
-                task_id=str(task.instance_id),
+                task_id=task.instance_id,
                 benchmark="swebench",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
         except asyncio.CancelledError:
-            task_id = str(task.instance_id) if task else "unknown"
+            task_id = task.instance_id if task else "unknown"
             solution_output = SolutionOutput(
                 task_id=task_id,
                 benchmark="swebench",
@@ -191,6 +192,7 @@ class SWEBenchCLI:
                 total_time_seconds=0.0,
                 error="Terminated by signal",
             )
+<<<<<<< HEAD
         # except Exception as e:
         #     # Build a minimal failure output so we always produce valid JSON
         #     task_id = str(task.instance_id) if task else "unknown"
@@ -206,6 +208,23 @@ class SWEBenchCLI:
         #         total_time_seconds=0.0,
         #         error=str(e),
         #     )
+=======
+        except Exception as e:
+            # Build a minimal failure output so we always produce valid JSON
+            task_id = task.instance_id if task else "unknown"
+            solution_output = SolutionOutput(
+                task_id=task_id,
+                benchmark="swebench",
+                success=False,
+                solution="",
+                iterations=0,
+                total_requests=0,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_time_seconds=0.0,
+                error=str(e),
+            )
+>>>>>>> fix/neon
         finally:
             try:
                 if solution_output is not None:
@@ -233,7 +252,7 @@ class SWEBenchCLI:
                         pass
 
 
-def main():
+def main() -> None:
     cli = SWEBenchCLI()
     asyncio.run(cli.run())
 

@@ -1,3 +1,0 @@
-from config.paths import WORKSPACE_ROOT, TESTBED_PATH, TMP_PATH
-
-all = ["WORKSPACE_ROOT", "TESTBED_PATH", "TMP_PATH"]

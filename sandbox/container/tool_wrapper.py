@@ -1,4 +1,3 @@
-
 from collections.abc import Callable
 from typing import Any
 
@@ -8,7 +7,8 @@ def create_tool_wrapper(
     call_tool: Callable[..., Any],
     parameter_names: list[str],
 ) -> Callable[..., Any]:
-    """Create an MCP tool wrapper supporting positional and keyword arguments."""
+    """Create an MCP tool wrapper supporting positional
+     and keyword arguments."""
 
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         if len(args) > len(parameter_names):
@@ -26,14 +26,10 @@ def create_tool_wrapper(
                 )
             arguments[key] = value
 
-        return call_tool(
-            name=tool_name,
-            arguments=arguments,
-        )
+        return call_tool(name=tool_name, arguments=arguments)
 
     wrapper.__name__ = tool_name
     wrapper.__doc__ = f"MCP tool: {tool_name}"
-
     return wrapper
 
 
@@ -41,16 +37,13 @@ def create_tool_namespace(
     tools: list[dict[str, Any]],
     call_tool: Callable[..., Any],
 ) -> dict[str, Callable[..., Any]]:
-    """Create wrappers for all discovered MCP tools."""
-
-    namespace = {}
+    """Create callable Python wrappers for all discovered MCP tools."""
+    namespace: dict[str, Callable[..., Any]] = {}
 
     for tool in tools:
         name = tool["name"]
-
-        parameter_names = list(
-            tool["inputSchema"].get("properties", {}).keys()
-        )
+        input_schema = tool.get("inputSchema") or {}
+        parameter_names = list(input_schema.get("properties", {}).keys())
 
         namespace[name] = create_tool_wrapper(
             tool_name=name,
